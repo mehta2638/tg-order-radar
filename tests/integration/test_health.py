@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from app.core.correlation import CORRELATION_ID_HEADER
 from app.main import create_app
@@ -14,7 +15,23 @@ async def test_liveness_endpoint_returns_ok() -> None:
         assert response.headers[CORRELATION_ID_HEADER]
 
 
-async def test_readiness_endpoint_returns_ok_with_existing_correlation_id() -> None:
+class FakeRedis:
+    async def ping(self) -> bool:
+        return True
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def test_readiness_endpoint_returns_ok_with_existing_correlation_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_check_database() -> None:
+        return None
+
+    monkeypatch.setattr("app.api.health.check_database", fake_check_database)
+    monkeypatch.setattr("app.api.health.redis.from_url", lambda url: FakeRedis())
+
     transport = httpx.ASGITransport(app=create_app())
     correlation_id = "test-correlation-id"
 

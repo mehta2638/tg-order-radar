@@ -1,4 +1,4 @@
-.PHONY: setup up down logs lint format typecheck test compose-config build
+.PHONY: setup up down logs lint format typecheck test compose-config build migrate seed
 
 setup:
 	python -m pip install --upgrade pip
@@ -24,6 +24,12 @@ typecheck:
 
 test:
 	python -m pytest -q
+
+migrate:
+	python -m alembic upgrade head
+
+seed:
+	python -m scripts.seed_keywords
 
 compose-config:
 	docker compose config

@@ -2,7 +2,7 @@
 
 TG Order Radar is a Python service for finding website development orders in public Telegram channels and groups.
 
-This repository is currently at stage 1: repository scaffold and local infrastructure. Domain models, Telegram collection, Celery tasks, and notification logic are intentionally not implemented yet.
+This repository is currently at stage 2: repository scaffold, local infrastructure, database models, and Alembic migrations. Telegram collection, Celery tasks, source CRUD, and notification logic are intentionally not implemented yet.
 
 ## Requirements
 
@@ -33,10 +33,25 @@ Start PostgreSQL, Redis, and the API:
 docker compose up -d postgres redis api
 ```
 
+Apply database migrations and seed base dictionaries:
+
+```bash
+python -m alembic upgrade head
+python -m scripts.seed_keywords
+```
+
 Health endpoints:
 
 - `GET http://localhost:8000/health/live`
 - `GET http://localhost:8000/health/ready`
+
+Source endpoints:
+
+- `POST http://localhost:8000/api/v1/sources` with body `{"link":"@public_channel"}`
+- `GET http://localhost:8000/api/v1/sources?page=1&size=20`
+- `GET http://localhost:8000/api/v1/sources/{id}`
+- `PATCH http://localhost:8000/api/v1/sources/{id}` with body `{"enabled":false}`
+- `DELETE http://localhost:8000/api/v1/sources/{id}` disables collection for the source
 
 Placeholder containers for later stages are available:
 
@@ -55,6 +70,7 @@ python -m mypy app
 python -m pytest -q
 docker compose config
 docker compose build
+python -m alembic upgrade head
 ```
 
 The Makefile exposes the same commands as `make format`, `make lint`, `make typecheck`, `make test`, `make compose-config`, and `make build`.
@@ -68,11 +84,15 @@ app/
   collector/  Telegram collector package for later stages
   core/       Settings, logging, middleware
   db/         Async database setup for later stages
-  models/     SQLAlchemy models for later stages
+  models/     SQLAlchemy 2.0 typed models
   schemas/    Pydantic schemas
   services/   Business services
   workers/    Background worker package for later stages
 tests/
   unit/
   integration/
+migrations/
+  versions/   Alembic revisions
+scripts/
+  seed_keywords.py
 ```

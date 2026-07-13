@@ -35,7 +35,10 @@ services:
       - path: .env
         required: false
     environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
       POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"

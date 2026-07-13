@@ -1,1 +1,31 @@
-"""Domain models will be introduced with database migrations."""
+from app.models.entities import (
+    AuditLog,
+    Classification,
+    DuplicateGroup,
+    Favorite,
+    Keyword,
+    Message,
+    MessageEntity,
+    NegativeKeyword,
+    NotificationDelivery,
+    Order,
+    TelegramAccount,
+    TelegramSource,
+    User,
+)
+
+__all__ = [
+    "AuditLog",
+    "Classification",
+    "DuplicateGroup",
+    "Favorite",
+    "Keyword",
+    "Message",
+    "MessageEntity",
+    "NegativeKeyword",
+    "NotificationDelivery",
+    "Order",
+    "TelegramAccount",
+    "TelegramSource",
+    "User",
+]
