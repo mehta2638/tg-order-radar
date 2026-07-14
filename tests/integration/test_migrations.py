@@ -79,6 +79,7 @@ async def assert_schema_and_constraints(settings: Settings) -> None:
             "notification_deliveries",
             "favorites",
             "audit_logs",
+            "failed_tasks",
         }.issubset({row["table_name"] for row in table_names})
 
         source_id = await connection.fetchval(

@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic",
     "asyncpg",
+    "celery",
     "fastapi",
     "httpx",
     "pydantic-settings",
@@ -53,7 +54,7 @@ pretty = true
 packages = ["app"]
 
 [[tool.mypy.overrides]]
-module = ["telethon", "telethon.*"]
+module = ["celery", "celery.*", "kombu", "kombu.*", "telethon", "telethon.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

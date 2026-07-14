@@ -396,3 +396,27 @@ class AuditLog(UuidPkMixin, Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class FailedTask(UuidPkMixin, Base):
+    __tablename__ = "failed_tasks"
+    __table_args__ = (
+        UniqueConstraint("dedup_key", name="uq_failed_tasks_dedup_key"),
+        Index("ix_failed_tasks_task_name", "task_name"),
+        Index("ix_failed_tasks_created_at", "created_at"),
+    )
+
+    task_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    queue: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    dedup_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    retries: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )

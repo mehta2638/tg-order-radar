@@ -77,12 +77,19 @@ python -m scripts.auth_telegram
 Session files are ignored by Git. In Docker Compose they are stored in the dedicated `telegram_sessions` volume.
 
 Placeholder containers for later stages are available:
+Start Celery worker and beat for background orchestration:
 
 ```bash
-docker compose up -d collector worker bot
+docker compose up -d worker beat
 ```
 
-They use the same application image and run safe no-op commands.
+The worker listens to `source_validation`, `telegram_collection`, `message_processing`, `classification`, `duplicate_detection`, `notifications`, and `maintenance`. Stages after source validation currently return explicit `skipped` results until their roadmap stages are implemented.
+
+Check worker dependencies:
+
+```bash
+python -m app.workers.health
+```
 
 ## Development Commands
 

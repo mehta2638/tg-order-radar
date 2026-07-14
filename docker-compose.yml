@@ -39,6 +39,8 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
       REDIS_URL: redis://redis:6379/0
       TG_SESSION_DIR: /data/telegram-sessions
     volumes:
@@ -74,9 +76,57 @@ services:
       - path: .env
         required: false
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["python", "-c", "import time; print('worker placeholder ready', flush=True); time.sleep(3600)"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+      TG_SESSION_DIR: /data/telegram-sessions
+    volumes:
+      - telegram_sessions:/data/telegram-sessions
+    command:
+      - python
+      - -m
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - worker
+      - -Q
+      - source_validation,telegram_collection,message_processing,classification,duplicate_detection,notifications,maintenance
+      - --loglevel=INFO
+
+  beat:
+    build:
+      context: .
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+    command:
+      - python
+      - -m
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - beat
+      - --loglevel=INFO
 
   bot:
     build:
