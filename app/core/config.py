@@ -27,6 +27,12 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
 
+    tg_api_id: int | None = Field(default=None, repr=False)
+    tg_api_hash: str | None = Field(default=None, repr=False)
+    tg_phone: str | None = Field(default=None, repr=False)
+    tg_session_dir: str = ".telegram-sessions"
+    tg_session_name: str = "collector"
+
     @property
     def database_url(self) -> str:
         return (

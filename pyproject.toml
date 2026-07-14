@@ -13,6 +13,7 @@ dependencies = [
     "redis",
     "sqlalchemy[asyncio]",
     "structlog",
+    "telethon",
     "uvicorn[standard]",
 ]
 
@@ -50,6 +51,10 @@ disallow_untyped_decorators = false
 warn_unreachable = true
 pretty = true
 packages = ["app"]
+
+[[tool.mypy.overrides]]
+module = ["telethon", "telethon.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q"

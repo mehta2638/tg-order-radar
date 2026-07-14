@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import httpx
@@ -22,7 +22,8 @@ from sqlalchemy.ext.asyncio import (
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.main import create_app
-from app.models import AuditLog
+from app.models import AuditLog, TelegramSource
+from app.services.sources import get_source
 
 
 @dataclass(frozen=True)
@@ -185,3 +186,33 @@ async def test_get_unknown_source_returns_not_found(api_context: ApiTestContext)
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "SOURCE_NOT_FOUND"
+
+
+async def test_validate_source_endpoint(
+    api_context: ApiTestContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_validate_source(session: AsyncSession, source_id: UUID) -> TelegramSource:
+        source = await get_source(session, source_id)
+        source.access_status = "ok"
+        source.is_public = True
+        source.tg_peer_id = -100777
+        await session.commit()
+        await session.refresh(source)
+        return source
+
+    monkeypatch.setattr("app.api.sources.validate_source", fake_validate_source)
+
+    transport = httpx.ASGITransport(app=api_context.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        create_response = await client.post(
+            "/api/v1/sources",
+            json={"link": "@validate_source"},
+        )
+        source_id = create_response.json()["id"]
+
+        validate_response = await client.post(f"/api/v1/sources/{source_id}/validate")
+
+    assert validate_response.status_code == 200
+    assert validate_response.json()["access_status"] == "ok"
+    assert validate_response.json()["tg_peer_id"] == -100777

@@ -52,6 +52,29 @@ Source endpoints:
 - `GET http://localhost:8000/api/v1/sources/{id}`
 - `PATCH http://localhost:8000/api/v1/sources/{id}` with body `{"enabled":false}`
 - `DELETE http://localhost:8000/api/v1/sources/{id}` disables collection for the source
+- `POST http://localhost:8000/api/v1/sources/{id}/validate` checks public read access through Telethon
+
+## Telegram Authorization
+
+Only public channels and groups are supported. The userbot account is used for read-only validation and later collection; the application does not send messages through it.
+
+Set Telegram credentials in `.env`:
+
+```bash
+TG_API_ID=123456
+TG_API_HASH=...
+TG_PHONE=+10000000000
+TG_SESSION_DIR=.telegram-sessions
+TG_SESSION_NAME=collector
+```
+
+Run the interactive authorization once:
+
+```bash
+python -m scripts.auth_telegram
+```
+
+Session files are ignored by Git. In Docker Compose they are stored in the dedicated `telegram_sessions` volume.
 
 Placeholder containers for later stages are available:
 

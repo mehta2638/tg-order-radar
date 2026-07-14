@@ -11,6 +11,7 @@ from app.schemas.sources import (
     SourceResponse,
     SourceUpdateRequest,
 )
+from app.services.source_validation import validate_source
 from app.services.sources import (
     create_source,
     disable_source,
@@ -76,3 +77,12 @@ async def delete_source_endpoint(
 ) -> Response:
     await disable_source(session, source_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{source_id}/validate", response_model=SourceResponse)
+async def validate_source_endpoint(
+    source_id: UUID,
+    session: SessionDep,
+) -> SourceResponse:
+    source = await validate_source(session, source_id)
+    return SourceResponse.model_validate(source)

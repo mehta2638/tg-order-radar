@@ -93,7 +93,7 @@ class TelegramSource(UuidPkMixin, TimestampMixin, Base):
         ),
         CheckConstraint(
             "access_status in ("
-            "'pending_validation','ok','not_found','private','banned','restricted','error'"
+            "'pending_validation','ok','not_found','private','banned','restricted','floodwait','error'"
             ")",
             name="access_status",
         ),

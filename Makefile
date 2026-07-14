@@ -1,4 +1,4 @@
-.PHONY: setup up down logs lint format typecheck test compose-config build migrate seed
+.PHONY: setup up down logs lint format typecheck test compose-config build migrate seed telegram-auth
 
 setup:
 	python -m pip install --upgrade pip
@@ -30,6 +30,9 @@ migrate:
 
 seed:
 	python -m scripts.seed_keywords
+
+telegram-auth:
+	python -m scripts.auth_telegram
 
 compose-config:
 	docker compose config

@@ -40,6 +40,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
       POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
       REDIS_URL: redis://redis:6379/0
+      TG_SESSION_DIR: /data/telegram-sessions
+    volumes:
+      - telegram_sessions:/data/telegram-sessions
     ports:
       - "8000:8000"
     depends_on:
@@ -58,6 +61,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    environment:
+      TG_SESSION_DIR: /data/telegram-sessions
+    volumes:
+      - telegram_sessions:/data/telegram-sessions
     command: ["python", "-c", "import time; print('collector placeholder ready', flush=True); time.sleep(3600)"]
 
   worker:
@@ -85,3 +92,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  telegram_sessions:

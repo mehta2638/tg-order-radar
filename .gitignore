@@ -18,6 +18,7 @@ venv/
 
 *.session
 *.session-journal
+.telegram-sessions/
 sessions/
 
 .idea/
