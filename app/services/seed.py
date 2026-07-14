@@ -155,6 +155,20 @@ NEGATIVE_KEYWORDS: tuple[NegativeKeywordSeed, ...] = (
         "is_regex": False,
         "enabled": True,
     },
+    {
+        "phrase": "создаю интернет-магазины",
+        "lang": "ru",
+        "weight": 4,
+        "is_regex": False,
+        "enabled": True,
+    },
+    {
+        "phrase": "разработаю лендинг",
+        "lang": "ru",
+        "weight": 4,
+        "is_regex": False,
+        "enabled": True,
+    },
 )
 
 

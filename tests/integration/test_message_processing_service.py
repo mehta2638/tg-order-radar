@@ -18,9 +18,18 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import Settings, get_settings
-from app.models import Keyword, Message, MessageEntity, NegativeKeyword, TelegramSource
+from app.models import (
+    Classification,
+    Keyword,
+    Message,
+    MessageEntity,
+    NegativeKeyword,
+    Order,
+    TelegramSource,
+)
 from app.services.dictionaries import invalidate_dictionary_cache
 from app.services.message_processing import process_message_in_session
+from app.services.order_classification import classify_message_in_session
 
 
 def run(coro_factory: Callable[[], Awaitable[None]]) -> None:
@@ -193,6 +202,36 @@ async def test_process_message_saves_prefilter_and_entities_idempotently(
             {"keyword_hit", "budget", "deadline", "contact", "project_type"}
         )
         assert len(entities) == first_entity_count
+
+
+async def test_classify_message_creates_rules_classification_and_order(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        await seed_dictionaries(session)
+        source = await create_source(session)
+        message = await create_message(
+            session,
+            source,
+            "Нужен лендинг. Бюджет 100к ₽, сделать за 5 дней, пишите @client",
+        )
+        await process_message_in_session(session, message.id)
+
+        result = await classify_message_in_session(session, message.id)
+        classification = await session.scalar(
+            select(Classification).where(Classification.message_id == message.id)
+        )
+        order = await session.scalar(select(Order).where(Order.message_id == message.id))
+
+        assert result.label == "order"
+        assert result.order_id is not None
+        assert classification is not None
+        assert classification.method == "rules"
+        assert classification.manual_review is False
+        assert order is not None
+        assert order.relevance_score >= 60
+        assert order.project_type == "landing_page"
+        assert order.contacts is not None
 
 
 @pytest.mark.parametrize(

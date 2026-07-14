@@ -36,6 +36,21 @@ class Settings(BaseSettings):
     collector_poll_interval_seconds: int = 60
     dictionary_cache_ttl_seconds: int = 300
     processing_fuzzy_enabled: bool = True
+    classification_manual_review_min_confidence: float = 0.4
+    classification_manual_review_max_confidence: float = 0.6
+    classification_order_min_confidence: float = 0.6
+    order_min_relevance_score: int = 60
+    relevance_freshness_days: int = 7
+    relevance_weight_need: float = 0.18
+    relevance_weight_task: float = 0.16
+    relevance_weight_budget: float = 0.14
+    relevance_weight_deadline: float = 0.08
+    relevance_weight_contact: float = 0.10
+    relevance_weight_niche: float = 0.14
+    relevance_weight_freshness: float = 0.08
+    relevance_weight_p_client: float = 0.12
+    relevance_weight_ad_penalty: float = 0.10
+    relevance_weight_spam_penalty: float = 0.10
 
     tg_api_id: int | None = Field(default=None, repr=False)
     tg_api_hash: str | None = Field(default=None, repr=False)

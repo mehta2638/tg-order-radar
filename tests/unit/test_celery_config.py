@@ -4,6 +4,7 @@ import pytest
 
 from app.collector.messages import CollectionResult
 from app.services.message_processing import MessageProcessingResult
+from app.services.order_classification import OrderClassificationResult
 from app.workers import tasks
 from app.workers.celery_app import BaseTaskWithRetry, celery_app
 from app.workers.queues import (
@@ -84,6 +85,7 @@ def test_process_message_task_returns_processing_result(monkeypatch: pytest.Monk
         )
 
     monkeypatch.setattr(tasks, "process_message", fake_process_message)
+    monkeypatch.setattr(tasks, "enqueue_classification", lambda *args, **kwargs: None)
 
     assert process_message_task(str(message_id)) == {
         "message_id": str(message_id),
@@ -97,6 +99,32 @@ def test_process_message_task_returns_processing_result(monkeypatch: pytest.Monk
 
 
 def test_placeholder_task_entrypoints_are_idempotent_skips() -> None:
-    assert classify_message_task("message-1")["status"] == "skipped"
     assert detect_duplicates_task("message-1")["status"] == "skipped"
     assert send_notification_task("order-1")["status"] == "skipped"
+
+
+def test_classify_message_task_returns_rules_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    message_id = uuid4()
+
+    async def fake_classify_message(message_id: UUID) -> OrderClassificationResult:
+        return OrderClassificationResult(
+            message_id=message_id,
+            status="classified",
+            label="order",
+            confidence=0.9,
+            manual_review=False,
+            relevance_score=88,
+            order_id=None,
+        )
+
+    monkeypatch.setattr(tasks, "classify_message", fake_classify_message)
+
+    assert classify_message_task(str(message_id)) == {
+        "message_id": str(message_id),
+        "status": "classified",
+        "label": "order",
+        "confidence": 0.9,
+        "manual_review": False,
+        "relevance_score": 88,
+        "order_id": None,
+    }

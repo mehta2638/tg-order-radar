@@ -12,6 +12,7 @@ from app.collector.messages import collect_source_messages
 from app.db.session import async_session_factory
 from app.models import Order, TelegramSource
 from app.services.message_processing import process_message
+from app.services.order_classification import classify_message
 from app.services.source_validation import validate_source
 from app.workers.celery_app import celery_app
 
@@ -147,6 +148,8 @@ def process_message_task(
     message_id: str, correlation_id: str | None = None
 ) -> dict[str, int | str | bool]:
     result = run_async(process_message(UUID(message_id)))
+    if result.status == "processed":
+        enqueue_classification(result.message_id, correlation_id)
     return {
         "message_id": str(result.message_id),
         "status": result.status,
@@ -158,9 +161,35 @@ def process_message_task(
     }
 
 
+def enqueue_classification(message_id: UUID, correlation_id: str | None = None) -> None:
+    classify_message_task.apply_async(
+        args=(str(message_id),),
+        kwargs={"correlation_id": correlation_id},
+        task_id=f"classification:{message_id}",
+    )
+
+
 @celery_app.task(name="app.workers.tasks.classify_message_task")
-def classify_message_task(message_id: str, correlation_id: str | None = None) -> dict[str, str]:
-    return skipped("classification", message_id)
+def classify_message_task(
+    message_id: str,
+    correlation_id: str | None = None,
+) -> dict[str, float | int | str | bool | None]:
+    result = run_async(classify_message(UUID(message_id)))
+    if result.order_id is not None:
+        detect_duplicates_task.apply_async(
+            args=(str(result.order_id),),
+            kwargs={"correlation_id": correlation_id},
+            task_id=f"duplicate-detection:{result.order_id}",
+        )
+    return {
+        "message_id": str(result.message_id),
+        "status": result.status,
+        "label": result.label,
+        "confidence": result.confidence,
+        "manual_review": result.manual_review,
+        "relevance_score": result.relevance_score,
+        "order_id": str(result.order_id) if result.order_id is not None else None,
+    }
 
 
 @celery_app.task(name="app.workers.tasks.detect_duplicates_task")
