@@ -80,10 +80,12 @@ Placeholder containers for later stages are available:
 Start Celery worker and beat for background orchestration:
 
 ```bash
-docker compose up -d worker beat
+docker compose up -d worker collector beat
 ```
 
 The worker listens to `source_validation`, `telegram_collection`, `message_processing`, `classification`, `duplicate_detection`, `notifications`, and `maintenance`. Stages after source validation currently return explicit `skipped` results until their roadmap stages are implemented.
+
+The `collector` service runs a Celery worker dedicated to `telegram_collection`. Celery beat periodically enqueues public enabled sources with `access_status=ok`; each source is protected by a Redis lease so parallel collector processes do not collect the same source at the same time. First collection backfills the last 7 days plus a 1-day buffer, then later runs collect messages after `last_seen_message_id`.
 
 Check worker dependencies:
 

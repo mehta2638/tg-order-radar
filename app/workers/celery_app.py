@@ -88,6 +88,7 @@ celery_app.conf.update(
             "queue": SOURCE_VALIDATION_QUEUE,
         },
         "app.workers.tasks.collect_source_messages_task": {"queue": TELEGRAM_COLLECTION_QUEUE},
+        "app.workers.tasks.enqueue_collectable_sources": {"queue": TELEGRAM_COLLECTION_QUEUE},
         "app.workers.tasks.process_message_task": {"queue": MESSAGE_PROCESSING_QUEUE},
         "app.workers.tasks.classify_message_task": {"queue": CLASSIFICATION_QUEUE},
         "app.workers.tasks.detect_duplicates_task": {"queue": DUPLICATE_DETECTION_QUEUE},
@@ -102,6 +103,10 @@ celery_app.conf.update(
         "archive-stale-orders": {
             "task": "app.workers.tasks.archive_stale_orders_task",
             "schedule": 3600.0,
+        },
+        "collect-public-sources": {
+            "task": "app.workers.tasks.enqueue_collectable_sources",
+            "schedule": float(settings.collector_poll_interval_seconds),
         },
     },
 )

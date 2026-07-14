@@ -1,3 +1,9 @@
+from uuid import UUID, uuid4
+
+import pytest
+
+from app.collector.messages import CollectionResult
+from app.workers import tasks
 from app.workers.celery_app import BaseTaskWithRetry, celery_app
 from app.workers.queues import (
     CLASSIFICATION_QUEUE,
@@ -40,12 +46,29 @@ def test_base_task_retry_policy_is_bounded() -> None:
     assert BaseTaskWithRetry.reject_on_worker_lost is True
 
 
-def test_placeholder_task_entrypoints_are_idempotent_skips() -> None:
-    assert collect_source_messages_task("source-1") == {
-        "stage": "telegram_collection",
-        "entity_id": "source-1",
-        "status": "skipped",
+def test_collect_source_task_returns_collector_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    source_id = uuid4()
+
+    async def fake_collect_source_messages(
+        source_id: UUID,
+        **kwargs: object,
+    ) -> CollectionResult:
+        return CollectionResult(source_id=source_id, status="ok", saved=1, enqueued=1)
+
+    monkeypatch.setattr(tasks, "collect_source_messages", fake_collect_source_messages)
+
+    assert collect_source_messages_task(str(source_id)) == {
+        "source_id": str(source_id),
+        "status": "ok",
+        "saved": 1,
+        "updated": 0,
+        "deleted": 0,
+        "enqueued": 1,
+        "last_seen_message_id": 0,
     }
+
+
+def test_placeholder_task_entrypoints_are_idempotent_skips() -> None:
     assert process_message_task("message-1")["status"] == "skipped"
     assert classify_message_task("message-1")["status"] == "skipped"
     assert detect_duplicates_task("message-1")["status"] == "skipped"

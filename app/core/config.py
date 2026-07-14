@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
     celery_task_max_retries: int = 3
+    collector_batch_limit: int = 500
+    collector_backfill_days: int = 7
+    collector_backfill_buffer_days: int = 1
+    collector_lease_ttl_seconds: int = 600
+    collector_poll_interval_seconds: int = 60
 
     tg_api_id: int | None = Field(default=None, repr=False)
     tg_api_hash: str | None = Field(default=None, repr=False)
