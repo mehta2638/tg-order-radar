@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     collector_backfill_buffer_days: int = 1
     collector_lease_ttl_seconds: int = 600
     collector_poll_interval_seconds: int = 60
+    dictionary_cache_ttl_seconds: int = 300
+    processing_fuzzy_enabled: bool = True
 
     tg_api_id: int | None = Field(default=None, repr=False)
     tg_api_hash: str | None = Field(default=None, repr=False)

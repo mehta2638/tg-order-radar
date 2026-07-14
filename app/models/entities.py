@@ -161,6 +161,8 @@ class Message(UuidPkMixin, TimestampMixin, Base):
     )
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalized_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detected_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    passed_prefilter: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     message_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     views_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

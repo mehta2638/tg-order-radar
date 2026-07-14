@@ -87,6 +87,8 @@ The worker listens to `source_validation`, `telegram_collection`, `message_proce
 
 The `collector` service runs a Celery worker dedicated to `telegram_collection`. Celery beat periodically enqueues public enabled sources with `access_status=ok`; each source is protected by a Redis lease so parallel collector processes do not collect the same source at the same time. First collection backfills the last 7 days plus a 1-day buffer, then later runs collect messages after `last_seen_message_id`.
 
+Message processing is rules-only in the MVP: it normalizes raw text, detects language, applies positive and negative dictionaries, extracts project type, budget, deadline and contacts, stores `message_entities`, and writes `messages.passed_prefilter`. Downstream classification, duplicate detection and notifications stay as later-stage placeholders.
+
 Check worker dependencies:
 
 ```bash

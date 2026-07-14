@@ -11,6 +11,7 @@ from sqlalchemy import and_, select, update
 from app.collector.messages import collect_source_messages
 from app.db.session import async_session_factory
 from app.models import Order, TelegramSource
+from app.services.message_processing import process_message
 from app.services.source_validation import validate_source
 from app.workers.celery_app import celery_app
 
@@ -142,8 +143,19 @@ def enqueue_message_processing(message_id: UUID, correlation_id: str | None = No
 
 
 @celery_app.task(name="app.workers.tasks.process_message_task")
-def process_message_task(message_id: str, correlation_id: str | None = None) -> dict[str, str]:
-    return skipped("message_processing", message_id)
+def process_message_task(
+    message_id: str, correlation_id: str | None = None
+) -> dict[str, int | str | bool]:
+    result = run_async(process_message(UUID(message_id)))
+    return {
+        "message_id": str(result.message_id),
+        "status": result.status,
+        "passed_prefilter": result.passed_prefilter,
+        "detected_language": result.detected_language,
+        "keyword_hits": result.keyword_hits,
+        "negative_hits": result.negative_hits,
+        "entities": result.entities,
+    }
 
 
 @celery_app.task(name="app.workers.tasks.classify_message_task")

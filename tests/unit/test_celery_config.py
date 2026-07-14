@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.collector.messages import CollectionResult
+from app.services.message_processing import MessageProcessingResult
 from app.workers import tasks
 from app.workers.celery_app import BaseTaskWithRetry, celery_app
 from app.workers.queues import (
@@ -68,8 +69,34 @@ def test_collect_source_task_returns_collector_result(monkeypatch: pytest.Monkey
     }
 
 
+def test_process_message_task_returns_processing_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    message_id = uuid4()
+
+    async def fake_process_message(message_id: UUID) -> MessageProcessingResult:
+        return MessageProcessingResult(
+            message_id=message_id,
+            status="processed",
+            passed_prefilter=True,
+            detected_language="ru",
+            keyword_hits=1,
+            negative_hits=0,
+            entities=4,
+        )
+
+    monkeypatch.setattr(tasks, "process_message", fake_process_message)
+
+    assert process_message_task(str(message_id)) == {
+        "message_id": str(message_id),
+        "status": "processed",
+        "passed_prefilter": True,
+        "detected_language": "ru",
+        "keyword_hits": 1,
+        "negative_hits": 0,
+        "entities": 4,
+    }
+
+
 def test_placeholder_task_entrypoints_are_idempotent_skips() -> None:
-    assert process_message_task("message-1")["status"] == "skipped"
     assert classify_message_task("message-1")["status"] == "skipped"
     assert detect_duplicates_task("message-1")["status"] == "skipped"
     assert send_notification_task("order-1")["status"] == "skipped"
