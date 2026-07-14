@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
 from app.core.config import Settings, get_settings
 from app.models import (
     Classification,
+    DuplicateGroup,
     Keyword,
     Message,
     MessageEntity,
@@ -27,6 +28,7 @@ from app.models import (
     Order,
     TelegramSource,
 )
+from app.services.deduplication import detect_duplicates_in_session
 from app.services.dictionaries import invalidate_dictionary_cache
 from app.services.message_processing import process_message_in_session
 from app.services.order_classification import classify_message_in_session
@@ -135,11 +137,16 @@ async def seed_dictionaries(session: AsyncSession) -> None:
     await session.flush()
 
 
-async def create_source(session: AsyncSession) -> TelegramSource:
+async def create_source(
+    session: AsyncSession,
+    *,
+    tg_peer_id: int = -100999,
+    username: str = "orders",
+) -> TelegramSource:
     source = TelegramSource(
-        tg_peer_id=-100999,
-        username="orders",
-        normalized_username="orders",
+        tg_peer_id=tg_peer_id,
+        username=username,
+        normalized_username=username,
         type="channel",
         is_public=True,
         enabled=True,
@@ -151,14 +158,19 @@ async def create_source(session: AsyncSession) -> TelegramSource:
 
 
 async def create_message(
-    session: AsyncSession, source: TelegramSource, text: str | None
+    session: AsyncSession,
+    source: TelegramSource,
+    text: str | None,
+    *,
+    published_at: datetime | None = None,
+    content_hash: str | None = None,
 ) -> Message:
     message = Message(
         source_id=source.id,
         tg_message_id=uuid4().int % 1_000_000,
-        published_at=datetime.now(UTC),
+        published_at=published_at or datetime.now(UTC),
         text=text,
-        content_hash=uuid4().hex,
+        content_hash=content_hash or uuid4().hex,
     )
     session.add(message)
     await session.flush()
@@ -232,6 +244,55 @@ async def test_classify_message_creates_rules_classification_and_order(
         assert order.relevance_score >= 60
         assert order.project_type == "landing_page"
         assert order.contacts is not None
+
+
+async def test_same_order_in_multiple_channels_has_single_canonical_order(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        await seed_dictionaries(session)
+        first_source = await create_source(session, tg_peer_id=-100991, username="orders_one")
+        second_source = await create_source(session, tg_peer_id=-100992, username="orders_two")
+        text = "Нужен лендинг. Бюджет 100к ₽, сделать за 5 дней, пишите @client"
+        first_message = await create_message(
+            session,
+            first_source,
+            text,
+            published_at=datetime(2026, 7, 15, 10, tzinfo=UTC),
+            content_hash="same-normalized-content",
+        )
+        second_message = await create_message(
+            session,
+            second_source,
+            text,
+            published_at=datetime(2026, 7, 15, 11, tzinfo=UTC),
+            content_hash="same-normalized-content",
+        )
+        for message in (first_message, second_message):
+            await process_message_in_session(session, message.id)
+            await classify_message_in_session(session, message.id)
+
+        first_order = await session.scalar(
+            select(Order).where(Order.message_id == first_message.id)
+        )
+        second_order = await session.scalar(
+            select(Order).where(Order.message_id == second_message.id)
+        )
+        assert first_order is not None
+        assert second_order is not None
+
+        first_result = await detect_duplicates_in_session(session, first_order.id)
+        second_result = await detect_duplicates_in_session(session, second_order.id)
+        duplicate_group = await session.scalar(select(DuplicateGroup))
+
+        assert first_result.is_canonical is True
+        assert second_result.is_canonical is False
+        assert second_result.canonical_order_id == first_order.id
+        assert duplicate_group is not None
+        assert duplicate_group.canonical_order_id == first_order.id
+        assert duplicate_group.size == 2
+        assert first_order.duplicate_group_id == duplicate_group.id
+        assert second_order.duplicate_group_id == duplicate_group.id
 
 
 @pytest.mark.parametrize(

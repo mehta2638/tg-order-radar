@@ -11,6 +11,7 @@ from sqlalchemy import and_, select, update
 from app.collector.messages import collect_source_messages
 from app.db.session import async_session_factory
 from app.models import Order, TelegramSource
+from app.services.deduplication import detect_duplicates_for_order
 from app.services.message_processing import process_message
 from app.services.order_classification import classify_message
 from app.services.source_validation import validate_source
@@ -193,8 +194,28 @@ def classify_message_task(
 
 
 @celery_app.task(name="app.workers.tasks.detect_duplicates_task")
-def detect_duplicates_task(message_id: str, correlation_id: str | None = None) -> dict[str, str]:
-    return skipped("duplicate_detection", message_id)
+def detect_duplicates_task(
+    order_id: str,
+    correlation_id: str | None = None,
+) -> dict[str, int | str | bool | None]:
+    result = run_async(detect_duplicates_for_order(UUID(order_id)))
+    if result.is_canonical:
+        send_notification_task.apply_async(
+            args=(str(result.canonical_order_id),),
+            kwargs={"correlation_id": correlation_id},
+            task_id=f"notifications:{result.canonical_order_id}",
+        )
+    return {
+        "order_id": str(result.order_id),
+        "status": result.status,
+        "is_canonical": result.is_canonical,
+        "canonical_order_id": str(result.canonical_order_id),
+        "duplicate_group_id": str(result.duplicate_group_id)
+        if result.duplicate_group_id is not None
+        else None,
+        "duplicate_count": result.duplicate_count,
+        "method": result.method,
+    }
 
 
 @celery_app.task(name="app.workers.tasks.send_notification_task")

@@ -283,6 +283,7 @@ class Order(UuidPkMixin, TimestampMixin, Base):
         Index("ix_orders_status", "status"),
         Index("ix_orders_project_type", "project_type"),
         Index("ix_orders_source_id", "source_id"),
+        Index("ix_orders_duplicate_fingerprint", "duplicate_fingerprint"),
     )
 
     message_id: Mapped[uuid.UUID] = mapped_column(
@@ -310,6 +311,7 @@ class Order(UuidPkMixin, TimestampMixin, Base):
     deadline: Mapped[date | None] = mapped_column(Date, nullable=True)
     deadline_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     contacts: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    duplicate_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     relevance_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="new")

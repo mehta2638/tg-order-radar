@@ -91,6 +91,8 @@ Message processing is rules-only in the MVP: it normalizes raw text, detects lan
 
 Rules classification assigns `order`, `vacancy`, `service_ad`, `resume`, `partnership`, `spam`, `discussion`, or `irrelevant`, stores `classifications.method=rules`, and calculates `relevance_score` with the section 9 weighted formula. Orders are created only for fresh `order` messages above the configured relevance and confidence thresholds; ML and LLM stages are not used in the MVP.
 
+Basic MVP deduplication links repeated orders within the 7-day freshness window by exact Telegram identity, normalized `content_hash`, and a deterministic fingerprint from normalized text, contacts, budget, and project type. Duplicate groups choose a canonical order by earliest publication time, then completeness, relevance, and order id; only canonical orders are enqueued for notifications.
+
 Check worker dependencies:
 
 ```bash

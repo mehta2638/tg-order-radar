@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.collector.messages import CollectionResult
+from app.services.deduplication import DeduplicationResult
 from app.services.message_processing import MessageProcessingResult
 from app.services.order_classification import OrderClassificationResult
 from app.workers import tasks
@@ -98,8 +99,43 @@ def test_process_message_task_returns_processing_result(monkeypatch: pytest.Monk
     }
 
 
+def test_detect_duplicates_task_enqueues_only_canonical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order_id = uuid4()
+    enqueued: list[str] = []
+
+    async def fake_detect_duplicates_for_order(order_id: UUID) -> DeduplicationResult:
+        return DeduplicationResult(
+            order_id=order_id,
+            status="unique",
+            is_canonical=True,
+            canonical_order_id=order_id,
+            duplicate_group_id=None,
+            duplicate_count=1,
+            method="fingerprint",
+        )
+
+    class FakeNotificationTask:
+        def apply_async(self, args: tuple[str], **kwargs: object) -> None:
+            enqueued.append(args[0])
+
+    monkeypatch.setattr(tasks, "detect_duplicates_for_order", fake_detect_duplicates_for_order)
+    monkeypatch.setattr(tasks, "send_notification_task", FakeNotificationTask())
+
+    assert detect_duplicates_task(str(order_id)) == {
+        "order_id": str(order_id),
+        "status": "unique",
+        "is_canonical": True,
+        "canonical_order_id": str(order_id),
+        "duplicate_group_id": None,
+        "duplicate_count": 1,
+        "method": "fingerprint",
+    }
+    assert enqueued == [str(order_id)]
+
+
 def test_placeholder_task_entrypoints_are_idempotent_skips() -> None:
-    assert detect_duplicates_task("message-1")["status"] == "skipped"
     assert send_notification_task("order-1")["status"] == "skipped"
 
 
