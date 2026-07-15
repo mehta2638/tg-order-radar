@@ -1,6 +1,6 @@
 """Add message prefilter fields.
 
-Revision ID: 0004_add_message_prefilter_fields
+Revision ID: 0004_msg_prefilter
 Revises: 0003_create_failed_tasks
 Create Date: 2026-07-15
 """
@@ -10,7 +10,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0004_add_message_prefilter_fields"
+revision: str = "0004_msg_prefilter"
 down_revision: str | None = "0003_create_failed_tasks"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

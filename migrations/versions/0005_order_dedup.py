@@ -1,7 +1,7 @@
 """Add order duplicate fingerprint.
 
-Revision ID: 0005_add_order_duplicate_fingerprint
-Revises: 0004_add_message_prefilter_fields
+Revision ID: 0005_order_dedup
+Revises: 0004_msg_prefilter
 Create Date: 2026-07-15
 """
 
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0005_add_order_duplicate_fingerprint"
-down_revision: str | None = "0004_add_message_prefilter_fields"
+revision: str = "0005_order_dedup"
+down_revision: str | None = "0004_msg_prefilter"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

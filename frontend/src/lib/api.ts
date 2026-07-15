@@ -43,6 +43,10 @@ export class ApiClient {
     });
   }
 
+  async exportOrdersCsv(filters: OrderFilters & { limit?: number }): Promise<string> {
+    return this.requestText(`/api/v1/orders/export${queryString({ ...filters, format: "csv" })}`);
+  }
+
   async getFavorites(): Promise<{ items: Favorite[]; total: number }> {
     return this.request<{ items: Favorite[]; total: number }>("/api/v1/favorites");
   }
@@ -155,6 +159,25 @@ export class ApiClient {
     }
 
     return payload as T;
+  }
+
+  private async requestText(path: string, init: RequestInit = {}): Promise<string> {
+    const response = await fetch(`${this.session.apiBaseUrl}${path}`, {
+      ...init,
+      headers: {
+        "X-API-Key": this.session.apiKey,
+        ...init.headers
+      }
+    });
+
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") ?? "";
+      const payload = contentType.includes("application/json") ? await response.json() : null;
+      const error = payload?.error;
+      throw new ApiError(error?.message ?? `API request failed with ${response.status}`, response.status, error?.code);
+    }
+
+    return response.text();
   }
 }
 

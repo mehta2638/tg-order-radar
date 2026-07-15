@@ -252,6 +252,23 @@ th {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
+.todo-panel {
+  border-color: #fedf89;
+}
+
+.todo-panel li {
+  margin-bottom: 8px;
+}
+
+.moderation-summary {
+  margin-bottom: 14px;
+}
+
+.compact-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .stat-value {
   font-size: 32px;
   font-weight: 800;

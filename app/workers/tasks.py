@@ -14,6 +14,7 @@ from app.collector.messages import collect_source_messages
 from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models import Order, TelegramSource
+from app.services.activity import recalculate_source_activity
 from app.services.deduplication import detect_duplicates_for_order
 from app.services.message_processing import process_message
 from app.services.order_classification import classify_message
@@ -87,6 +88,17 @@ async def _archive_stale_orders() -> dict[str, int]:
     return {"archived": int(getattr(result, "rowcount", 0))}
 
 
+@celery_app.task(name="app.workers.tasks.recalculate_source_activity_task")
+def recalculate_source_activity_task(correlation_id: str | None = None) -> dict[str, int]:
+    return run_async(_recalculate_source_activity_task())
+
+
+async def _recalculate_source_activity_task() -> dict[str, int]:
+    async with async_session_factory() as session:
+        results = await recalculate_source_activity(session)
+    return {"updated": len(results)}
+
+
 @celery_app.task(name="app.workers.tasks.collect_source_messages_task")
 def collect_source_messages_task(
     source_id: str,
@@ -120,11 +132,17 @@ async def _enqueue_collectable_sources(correlation_id: str | None = None) -> dic
     async with async_session_factory() as session:
         source_ids = list(
             await session.scalars(
-                select(TelegramSource.id).where(
+                select(TelegramSource.id)
+                .where(
                     TelegramSource.enabled.is_(True),
                     TelegramSource.is_public.is_(True),
                     TelegramSource.access_status == "ok",
                     (TelegramSource.pause_until.is_(None) | (TelegramSource.pause_until <= now)),
+                )
+                .order_by(
+                    TelegramSource.activity_score.desc(),
+                    TelegramSource.last_checked_at.asc().nullsfirst(),
+                    TelegramSource.id,
                 )
             )
         )

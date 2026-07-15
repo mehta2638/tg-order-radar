@@ -154,9 +154,6 @@ def choose_label(
         return "service_ad", 0.88
     if DISCUSSION_RE.search(text) and signals["need"] < 1.0:
         return "discussion", 0.76
-    if data.passed_prefilter is False and not data.keyword_hits:
-        return "irrelevant", 0.9
-
     order_strength = (
         0.32 * signals["need"]
         + 0.24 * signals["task"]
@@ -165,6 +162,8 @@ def choose_label(
         + 0.08 * signals["contact"]
         + 0.08 * signals["deadline"]
     )
+    if data.passed_prefilter is False and not data.keyword_hits and order_strength < 0.42:
+        return "irrelevant", 0.9
     if order_strength >= 0.58 and signals["ad_signals"] < 0.5 and signals["spam_signals"] < 0.5:
         return "order", min(0.95, max(0.62, order_strength + 0.18))
     if order_strength >= 0.42:

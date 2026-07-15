@@ -1,7 +1,7 @@
 """Add order search indexes.
 
-Revision ID: 0006_add_order_search_indexes
-Revises: 0005_add_order_duplicate_fingerprint
+Revision ID: 0006_order_search
+Revises: 0005_order_dedup
 Create Date: 2026-07-15
 """
 
@@ -9,8 +9,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0006_add_order_search_indexes"
-down_revision: str | None = "0005_add_order_duplicate_fingerprint"
+revision: str = "0006_order_search"
+down_revision: str | None = "0005_order_dedup"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -12,6 +12,7 @@ from app.workers.celery_app import BaseTaskWithRetry, celery_app
 from app.workers.queues import (
     CLASSIFICATION_QUEUE,
     DUPLICATE_DETECTION_QUEUE,
+    MAINTENANCE_QUEUE,
     MESSAGE_PROCESSING_QUEUE,
     NOTIFICATIONS_QUEUE,
     SOURCE_VALIDATION_QUEUE,
@@ -36,10 +37,16 @@ def test_celery_queues_and_routes_are_configured() -> None:
         CLASSIFICATION_QUEUE,
         DUPLICATE_DETECTION_QUEUE,
         NOTIFICATIONS_QUEUE,
+        MAINTENANCE_QUEUE,
     }.issubset(queue_names)
     assert celery_app.conf.task_acks_late is True
     assert celery_app.conf.task_reject_on_worker_lost is True
     assert celery_app.conf.worker_prefetch_multiplier == 1
+    assert (
+        celery_app.conf.task_routes["app.workers.tasks.recalculate_source_activity_task"]["queue"]
+        == MAINTENANCE_QUEUE
+    )
+    assert "recalculate-source-activity" in celery_app.conf.beat_schedule
 
 
 def test_base_task_retry_policy_is_bounded() -> None:

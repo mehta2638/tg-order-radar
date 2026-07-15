@@ -5,8 +5,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.schemas.orders import OrderResponse
-
 
 class FavoriteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -14,7 +12,6 @@ class FavoriteResponse(BaseModel):
     id: UUID
     order_id: UUID
     created_at: datetime
-    order: OrderResponse | None = None
 
 
 class FavoriteListResponse(BaseModel):
