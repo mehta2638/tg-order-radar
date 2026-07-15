@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -10,7 +10,7 @@ from app.bot import services
 from app.bot.cards import OrderCard, build_order_keyboard, render_order_card
 from app.bot.handlers import parse_order_callback
 from app.core.config import Settings
-from app.models import NotificationDelivery, User
+from app.models import NotificationDelivery, Order, User
 
 
 class FakeSender:
@@ -20,6 +20,22 @@ class FakeSender:
     async def send_message(self, chat_id: int, **kwargs: object) -> object:
         self.chat_ids.append(chat_id)
         return object()
+
+
+class FakeScalarResult:
+    def __init__(self, row: object | None) -> None:
+        self.row = row
+
+    def one_or_none(self) -> object | None:
+        return self.row
+
+
+class FakeQuerySession:
+    def __init__(self, row: object | None) -> None:
+        self.row = row
+
+    async def execute(self, statement: object) -> FakeScalarResult:
+        return FakeScalarResult(self.row)
 
 
 def make_card(order_id: str) -> OrderCard:
@@ -165,3 +181,25 @@ async def test_send_order_notification_sends_new_delivery(monkeypatch: pytest.Mo
     assert result.sent == 1
     assert delivery.status == "sent"
     assert sender.chat_ids == [42]
+
+
+async def test_stale_order_is_not_notifiable() -> None:
+    order = Order(
+        id=uuid4(),
+        message_id=uuid4(),
+        source_id=uuid4(),
+        published_at=datetime.now(UTC) - timedelta(days=8),
+        relevance_score=95,
+        status="new",
+        is_fresh=True,
+        summary="Нужен сайт",
+    )
+    row = (order, "orders", "https://t.me/orders/1", None)
+
+    card = await services.get_notifiable_order_card(
+        FakeQuerySession(row),
+        order.id,
+        Settings(relevance_freshness_days=7, order_min_relevance_score=60),
+    )
+
+    assert card is None

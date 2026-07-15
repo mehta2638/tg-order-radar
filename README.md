@@ -1,8 +1,6 @@
 # TG Order Radar
 
-TG Order Radar is a Python service for finding website development orders in public Telegram channels and groups.
-
-This repository is currently at stage 2: repository scaffold, local infrastructure, database models, and Alembic migrations. Telegram collection, Celery tasks, source CRUD, and notification logic are intentionally not implemented yet.
+TG Order Radar is a Python service for finding website development orders in public Telegram channels and groups. The current MVP can validate public sources, collect recent messages, process and classify them with rules, deduplicate orders, expose a REST API, and send Telegram bot notifications.
 
 ## Requirements
 
@@ -27,10 +25,10 @@ Do not put real secrets into Git.
 
 ## Run Locally
 
-Start PostgreSQL, Redis, and the API:
+Start infrastructure and application processes:
 
 ```bash
-docker compose up -d postgres redis api
+docker compose up -d postgres redis
 ```
 
 Apply database migrations and seed base dictionaries:
@@ -38,6 +36,18 @@ Apply database migrations and seed base dictionaries:
 ```bash
 python -m alembic upgrade head
 python -m scripts.seed_keywords
+```
+
+Authorize the read-only Telegram userbot once if you plan to validate or collect real public sources:
+
+```bash
+python -m scripts.auth_telegram
+```
+
+Start API, Celery workers, scheduler, collector queue worker, and bot polling:
+
+```bash
+docker compose up -d api worker collector beat bot
 ```
 
 Health endpoints:
@@ -76,18 +86,17 @@ python -m scripts.auth_telegram
 
 Session files are ignored by Git. In Docker Compose they are stored in the dedicated `telegram_sessions` volume.
 
-Placeholder containers for later stages are available:
 Start Celery worker and beat for background orchestration:
 
 ```bash
 docker compose up -d worker collector beat
 ```
 
-The worker listens to `source_validation`, `telegram_collection`, `message_processing`, `classification`, `duplicate_detection`, `notifications`, and `maintenance`. Stages after source validation currently return explicit `skipped` results until their roadmap stages are implemented.
+The worker listens to `source_validation`, `telegram_collection`, `message_processing`, `classification`, `duplicate_detection`, `notifications`, and `maintenance`.
 
 The `collector` service runs a Celery worker dedicated to `telegram_collection`. Celery beat periodically enqueues public enabled sources with `access_status=ok`; each source is protected by a Redis lease so parallel collector processes do not collect the same source at the same time. First collection backfills the last 7 days plus a 1-day buffer, then later runs collect messages after `last_seen_message_id`.
 
-Message processing is rules-only in the MVP: it normalizes raw text, detects language, applies positive and negative dictionaries, extracts project type, budget, deadline and contacts, stores `message_entities`, and writes `messages.passed_prefilter`. Downstream classification, duplicate detection and notifications stay as later-stage placeholders.
+Message processing is rules-only in the MVP: it normalizes raw text, detects language, applies positive and negative dictionaries, extracts project type, budget, deadline and contacts, stores `message_entities`, and writes `messages.passed_prefilter`. Classification, duplicate detection, and notifications are handled by downstream Celery queues.
 
 Rules classification assigns `order`, `vacancy`, `service_ad`, `resume`, `partnership`, `spam`, `discussion`, or `irrelevant`, stores `classifications.method=rules`, and calculates `relevance_score` with the section 9 weighted formula. Orders are created only for fresh `order` messages above the configured relevance and confidence thresholds; ML and LLM stages are not used in the MVP.
 
@@ -96,6 +105,33 @@ Basic MVP deduplication links repeated orders within the 7-day freshness window 
 MVP REST API under `/api/v1` uses simple API-key auth via `X-API-Key` with `admin`, `operator`, and `viewer` roles. It includes order list/detail/status/export endpoints, favorites, keyword and negative keyword CRUD with dictionary cache invalidation, and `/api/v1/stats/summary`.
 
 Telegram bot MVP runs as a separate polling process with aiogram 3 (`python -m app.bot.main` or the `bot` compose service). Configure `BOT_TOKEN` and `BOT_ALLOWED_USER_IDS` for local recipients; delivery is deduplicated through `notification_deliveries`, and callbacks can add favorites or mark orders as contacted/irrelevant.
+
+## MVP Walkthrough
+
+1. Configure `.env` with PostgreSQL/Redis defaults, `TG_API_ID`, `TG_API_HASH`, `TG_PHONE`, `BOT_TOKEN`, and comma-separated `BOT_ALLOWED_USER_IDS`.
+2. Run `python -m alembic upgrade head` and `python -m scripts.seed_keywords`.
+3. Start services with `docker compose up -d api worker collector beat bot`.
+4. Add a source:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/sources \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-admin-key" \
+  -d "{\"link\":\"https://t.me/public_channel\"}"
+```
+
+5. Validate it through `POST /api/v1/sources/{source_id}/validate` or wait for beat to enqueue pending validations.
+6. The collector reads the last 7 days plus buffer, processing/classification creates fresh high-relevance orders, duplicate detection chooses the canonical order, and the notifications queue sends one bot message per allowed recipient.
+7. Use bot buttons to add favorites or mark an order as contacted/irrelevant.
+8. Verify results with `GET /api/v1/orders`, `/api/v1/favorites`, and `/api/v1/stats/summary`.
+
+Useful API headers:
+
+```text
+X-API-Key: dev-admin-key
+X-API-Key: dev-operator-key
+X-API-Key: dev-viewer-key
+```
 
 Check worker dependencies:
 
@@ -115,6 +151,14 @@ docker compose build
 python -m alembic upgrade head
 ```
 
+Opt-in checks:
+
+```bash
+set RUN_MVP_REAL_SMOKE=1
+set TG_PUBLIC_TEST_SOURCE=https://t.me/public_channel
+python -m pytest -q tests/integration/test_mvp_real_smoke_opt_in.py
+```
+
 The Makefile exposes the same commands as `make format`, `make lint`, `make typecheck`, `make test`, `make compose-config`, and `make build`.
 
 ## Project Layout
@@ -122,14 +166,14 @@ The Makefile exposes the same commands as `make format`, `make lint`, `make type
 ```text
 app/
   api/        FastAPI routers
-  bot/        Notification bot package for later stages
-  collector/  Telegram collector package for later stages
+  bot/        Telegram notification bot
+  collector/  Telegram collector
   core/       Settings, logging, middleware
-  db/         Async database setup for later stages
+  db/         Async database setup
   models/     SQLAlchemy 2.0 typed models
   schemas/    Pydantic schemas
   services/   Business services
-  workers/    Background worker package for later stages
+  workers/    Background worker package
 tests/
   unit/
   integration/

@@ -50,6 +50,12 @@ def test_base_task_retry_policy_is_bounded() -> None:
     assert BaseTaskWithRetry.reject_on_worker_lost is True
 
 
+def test_worker_crash_before_ack_requeues_task() -> None:
+    assert celery_app.conf.task_acks_late is True
+    assert celery_app.conf.task_reject_on_worker_lost is True
+    assert celery_app.conf.worker_prefetch_multiplier == 1
+
+
 def test_collect_source_task_returns_collector_result(monkeypatch: pytest.MonkeyPatch) -> None:
     source_id = uuid4()
 

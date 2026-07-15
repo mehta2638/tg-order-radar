@@ -247,7 +247,3 @@ async def _send_notification_task(order_id: UUID) -> dict[str, int | str]:
         "skipped": result.skipped,
         "failed": result.failed,
     }
-
-
-def skipped(stage: str, entity_id: str) -> dict[str, str]:
-    return {"stage": stage, "entity_id": entity_id, "status": "skipped"}
