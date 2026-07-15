@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     relevance_weight_p_client: float = 0.12
     relevance_weight_ad_penalty: float = 0.10
     relevance_weight_spam_penalty: float = 0.10
+    api_key_admin: str = Field(default="dev-admin-key", repr=False)
+    api_key_operator: str = Field(default="dev-operator-key", repr=False)
+    api_key_viewer: str = Field(default="dev-viewer-key", repr=False)
 
     tg_api_id: int | None = Field(default=None, repr=False)
     tg_api_hash: str | None = Field(default=None, repr=False)

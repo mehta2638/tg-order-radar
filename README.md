@@ -93,6 +93,8 @@ Rules classification assigns `order`, `vacancy`, `service_ad`, `resume`, `partne
 
 Basic MVP deduplication links repeated orders within the 7-day freshness window by exact Telegram identity, normalized `content_hash`, and a deterministic fingerprint from normalized text, contacts, budget, and project type. Duplicate groups choose a canonical order by earliest publication time, then completeness, relevance, and order id; only canonical orders are enqueued for notifications.
 
+MVP REST API under `/api/v1` uses simple API-key auth via `X-API-Key` with `admin`, `operator`, and `viewer` roles. It includes order list/detail/status/export endpoints, favorites, keyword and negative keyword CRUD with dictionary cache invalidation, and `/api/v1/stats/summary`.
+
 Check worker dependencies:
 
 ```bash

@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 import redis.asyncio as redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -110,6 +111,8 @@ async def invalidate_dictionary_cache() -> None:
     try:
         await client.delete(POSITIVE_CACHE_KEY, NEGATIVE_CACHE_KEY)
         await client.publish(DICTIONARY_RELOAD_CHANNEL, "reload")
+    except (OSError, RedisError):
+        return
     finally:
         await client.aclose()
 
