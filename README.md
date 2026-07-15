@@ -133,6 +133,25 @@ X-API-Key: dev-operator-key
 X-API-Key: dev-viewer-key
 ```
 
+## Admin Panel
+
+The minimal Next.js admin panel lives in `frontend/`.
+
+```bash
+cd frontend
+npm install
+copy .env.example .env.local
+npm run dev
+```
+
+Configure the backend URL with:
+
+```text
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
+
+Open `http://localhost:3000/login`, enter one of the backend API keys, and use the Orders, Sources, Keywords, and Statistics pages.
+
 Check worker dependencies:
 
 ```bash
@@ -177,6 +196,9 @@ app/
 tests/
   unit/
   integration/
+frontend/
+  src/app/     Next.js admin pages
+  src/lib/     Typed API client
 migrations/
   versions/   Alembic revisions
 scripts/

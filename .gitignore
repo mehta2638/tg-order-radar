@@ -29,3 +29,7 @@ sessions/
 dist/
 build/
 *.egg-info/
+
+frontend/node_modules/
+frontend/.next/
+frontend/out/
