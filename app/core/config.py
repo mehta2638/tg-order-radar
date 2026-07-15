@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     api_key_admin: str = Field(default="dev-admin-key", repr=False)
     api_key_operator: str = Field(default="dev-operator-key", repr=False)
     api_key_viewer: str = Field(default="dev-viewer-key", repr=False)
+    bot_token: str | None = Field(default=None, repr=False)
+    bot_allowed_user_ids: str = ""
+    bot_rate_limit_seconds: float = 0.2
+    bot_send_max_retries: int = 3
 
     tg_api_id: int | None = Field(default=None, repr=False)
     tg_api_hash: str | None = Field(default=None, repr=False)
@@ -72,6 +76,14 @@ class Settings(BaseSettings):
     @property
     def alembic_database_url(self) -> str:
         return self.database_url
+
+    @property
+    def parsed_bot_allowed_user_ids(self) -> set[int]:
+        return {
+            int(user_id.strip())
+            for user_id in self.bot_allowed_user_ids.split(",")
+            if user_id.strip()
+        }
 
 
 @lru_cache

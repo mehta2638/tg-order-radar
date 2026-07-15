@@ -95,6 +95,8 @@ Basic MVP deduplication links repeated orders within the 7-day freshness window 
 
 MVP REST API under `/api/v1` uses simple API-key auth via `X-API-Key` with `admin`, `operator`, and `viewer` roles. It includes order list/detail/status/export endpoints, favorites, keyword and negative keyword CRUD with dictionary cache invalidation, and `/api/v1/stats/summary`.
 
+Telegram bot MVP runs as a separate polling process with aiogram 3 (`python -m app.bot.main` or the `bot` compose service). Configure `BOT_TOKEN` and `BOT_ALLOWED_USER_IDS` for local recipients; delivery is deduplicated through `notification_deliveries`, and callbacks can add favorites or mark orders as contacted/irrelevant.
+
 Check worker dependencies:
 
 ```bash

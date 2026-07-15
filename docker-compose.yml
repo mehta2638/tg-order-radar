@@ -153,9 +153,19 @@ services:
       - path: .env
         required: false
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["python", "-c", "import time; print('bot placeholder ready', flush=True); time.sleep(3600)"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      REDIS_URL: redis://redis:6379/0
+    command: ["python", "-m", "app.bot.main"]
 
 volumes:
   postgres_data:

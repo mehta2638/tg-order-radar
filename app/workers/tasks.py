@@ -6,9 +6,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from aiogram import Bot
 from sqlalchemy import and_, select, update
 
+from app.bot.services import send_order_notification
 from app.collector.messages import collect_source_messages
+from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models import Order, TelegramSource
 from app.services.deduplication import detect_duplicates_for_order
@@ -219,8 +222,31 @@ def detect_duplicates_task(
 
 
 @celery_app.task(name="app.workers.tasks.send_notification_task")
-def send_notification_task(order_id: str, correlation_id: str | None = None) -> dict[str, str]:
-    return skipped("notifications", order_id)
+def send_notification_task(
+    order_id: str,
+    correlation_id: str | None = None,
+) -> dict[str, int | str]:
+    return run_async(_send_notification_task(UUID(order_id)))
+
+
+async def _send_notification_task(order_id: UUID) -> dict[str, int | str]:
+    settings = get_settings()
+    if not settings.bot_token:
+        return {"stage": "notifications", "entity_id": str(order_id), "status": "skipped"}
+
+    bot = Bot(token=settings.bot_token)
+    try:
+        async with async_session_factory() as session:
+            result = await send_order_notification(session, order_id, bot, settings)
+    finally:
+        await bot.session.close()
+    return {
+        "order_id": str(result.order_id),
+        "status": result.status,
+        "sent": result.sent,
+        "skipped": result.skipped,
+        "failed": result.failed,
+    }
 
 
 def skipped(stage: str, entity_id: str) -> dict[str, str]:

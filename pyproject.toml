@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "alembic",
+    "aiogram",
     "asyncpg",
     "celery",
     "fastapi",
@@ -54,7 +55,7 @@ pretty = true
 packages = ["app"]
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*", "kombu", "kombu.*", "telethon", "telethon.*"]
+module = ["aiogram", "aiogram.*", "celery", "celery.*", "kombu", "kombu.*", "telethon", "telethon.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

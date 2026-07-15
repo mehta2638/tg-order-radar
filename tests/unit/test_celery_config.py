@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.collector.messages import CollectionResult
+from app.core.config import get_settings
 from app.services.deduplication import DeduplicationResult
 from app.services.message_processing import MessageProcessingResult
 from app.services.order_classification import OrderClassificationResult
@@ -135,8 +136,19 @@ def test_detect_duplicates_task_enqueues_only_canonical(
     assert enqueued == [str(order_id)]
 
 
-def test_placeholder_task_entrypoints_are_idempotent_skips() -> None:
-    assert send_notification_task("order-1")["status"] == "skipped"
+def test_notification_task_skips_without_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BOT_TOKEN", raising=False)
+    get_settings.cache_clear()
+    order_id = uuid4()
+
+    try:
+        assert send_notification_task(str(order_id)) == {
+            "stage": "notifications",
+            "entity_id": str(order_id),
+            "status": "skipped",
+        }
+    finally:
+        get_settings.cache_clear()
 
 
 def test_classify_message_task_returns_rules_result(monkeypatch: pytest.MonkeyPatch) -> None:
