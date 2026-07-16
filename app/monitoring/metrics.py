@@ -19,7 +19,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.models import FailedTask, TelegramSource
+from app.models import FailedTask, TelegramAccount, TelegramSource
 from app.workers.queues import TASK_QUEUES
 
 REGISTRY = CollectorRegistry()
@@ -170,11 +170,8 @@ async def refresh_runtime_gauges(session: AsyncSession) -> None:
 
     floodwait_count = await session.scalar(
         select(func.count())
-        .select_from(TelegramSource)
-        .where(
-            TelegramSource.enabled.is_(True),
-            TelegramSource.access_status == "floodwait",
-        )
+        .select_from(TelegramAccount)
+        .where(TelegramAccount.status == "floodwait")
     )
     FLOODWAIT_ACTIVE_ACCOUNTS.set(float(floodwait_count or 0))
 

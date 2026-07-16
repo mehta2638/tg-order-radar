@@ -102,6 +102,11 @@ celery_app.conf.update(
         "app.workers.tasks.recalculate_source_activity_task": {
             "queue": MAINTENANCE_QUEUE,
         },
+        "app.workers.tasks.ensure_message_partitions_task": {"queue": MAINTENANCE_QUEUE},
+        "app.workers.tasks.drop_expired_message_partitions_task": {
+            "queue": MAINTENANCE_QUEUE,
+        },
+        "app.workers.tasks.recover_floodwait_state_task": {"queue": MAINTENANCE_QUEUE},
     },
     beat_schedule={
         "validate-pending-sources": {
@@ -115,6 +120,18 @@ celery_app.conf.update(
         "recalculate-source-activity": {
             "task": "app.workers.tasks.recalculate_source_activity_task",
             "schedule": 10800.0,
+        },
+        "ensure-message-partitions": {
+            "task": "app.workers.tasks.ensure_message_partitions_task",
+            "schedule": 86400.0,
+        },
+        "drop-expired-message-partitions": {
+            "task": "app.workers.tasks.drop_expired_message_partitions_task",
+            "schedule": 86400.0,
+        },
+        "recover-floodwait-state": {
+            "task": "app.workers.tasks.recover_floodwait_state_task",
+            "schedule": 60.0,
         },
         "collect-public-sources": {
             "task": "app.workers.tasks.enqueue_collectable_sources",

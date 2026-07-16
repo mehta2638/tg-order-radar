@@ -16,6 +16,11 @@ from app.db.session import async_session_factory
 from app.models import Order, TelegramSource
 from app.services.activity import recalculate_source_activity
 from app.services.deduplication import detect_duplicates_for_order
+from app.services.floodwait_recovery import recover_expired_floodwaits
+from app.services.message_partitions import (
+    drop_expired_message_partitions,
+    ensure_message_partitions,
+)
 from app.services.message_processing import process_message
 from app.services.order_classification import classify_message
 from app.services.source_validation import validate_source
@@ -127,9 +132,12 @@ def enqueue_collectable_sources(correlation_id: str | None = None) -> dict[str, 
     return run_async(_enqueue_collectable_sources(correlation_id=correlation_id))
 
 
-async def _enqueue_collectable_sources(correlation_id: str | None = None) -> dict[str, int]:
+async def _enqueue_collectable_sources(
+    correlation_id: str | None = None,
+) -> dict[str, int]:
     now = datetime.now(UTC)
     async with async_session_factory() as session:
+        recovery = await recover_expired_floodwaits(session)
         source_ids = list(
             await session.scalars(
                 select(TelegramSource.id)
@@ -154,7 +162,43 @@ async def _enqueue_collectable_sources(correlation_id: str | None = None) -> dic
             task_id=f"telegram-collection:{source_id}",
         )
 
-    return {"enqueued": len(source_ids)}
+    return {
+        "enqueued": len(source_ids),
+        "recovered_accounts": recovery["accounts"],
+        "recovered_sources": recovery["sources"],
+    }
+
+
+@celery_app.task(name="app.workers.tasks.ensure_message_partitions_task")
+def ensure_message_partitions_task(correlation_id: str | None = None) -> dict[str, object]:
+    return run_async(_ensure_message_partitions_task())
+
+
+async def _ensure_message_partitions_task() -> dict[str, object]:
+    async with async_session_factory() as session:
+        return await ensure_message_partitions(session)
+
+
+@celery_app.task(name="app.workers.tasks.drop_expired_message_partitions_task")
+def drop_expired_message_partitions_task(
+    correlation_id: str | None = None,
+) -> dict[str, object]:
+    return run_async(_drop_expired_message_partitions_task())
+
+
+async def _drop_expired_message_partitions_task() -> dict[str, object]:
+    async with async_session_factory() as session:
+        return await drop_expired_message_partitions(session)
+
+
+@celery_app.task(name="app.workers.tasks.recover_floodwait_state_task")
+def recover_floodwait_state_task(correlation_id: str | None = None) -> dict[str, int]:
+    return run_async(_recover_floodwait_state_task())
+
+
+async def _recover_floodwait_state_task() -> dict[str, int]:
+    async with async_session_factory() as session:
+        return await recover_expired_floodwaits(session)
 
 
 def enqueue_message_processing(message_id: UUID, correlation_id: str | None = None) -> None:

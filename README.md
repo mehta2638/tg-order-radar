@@ -93,6 +93,12 @@ bash scripts/test_backup_restore.sh
 
 VPS hardening checklist: `docs/vps-hardening.md`. Runbooks: `docs/runbooks/`.
 
+## Scaling (stage 21)
+
+- Multi-account collection via `TG_SESSION_NAMES` (comma-separated session files) distributes sources by stable hash. FloodWait pauses the affected account and source until Telegram’s wait expires — no rotation around limits.
+- Per-account Redis lease + `COLLECTOR_MAX_REQUESTS_PER_MINUTE` keep read load conservative.
+- `messages` is range-partitioned by `published_at` (monthly). Beat jobs create future partitions and drop partitions older than `MESSAGES_RETENTION_DAYS`.
+
 ## Telegram Authorization
 
 Only public channels and groups are supported. The userbot account is used for read-only validation and later collection; the application does not send messages through it.

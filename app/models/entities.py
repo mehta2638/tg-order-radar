@@ -134,16 +134,29 @@ class TelegramSource(UuidPkMixin, TimestampMixin, Base):
     messages: Mapped[list[Message]] = relationship(back_populates="source")
 
 
-class Message(UuidPkMixin, TimestampMixin, Base):
+class Message(TimestampMixin, Base):
     __tablename__ = "messages"
     __table_args__ = (
-        UniqueConstraint("source_id", "tg_message_id", name="uq_messages_source_tg_message_id"),
+        # DB physical PK is (id, published_at) for RANGE partitioning; ORM keeps id PK
+        # because message UUIDs are globally unique and session.get()/FKs use id.
+        UniqueConstraint(
+            "source_id",
+            "tg_message_id",
+            "published_at",
+            name="uq_messages_source_tg_message_published_at",
+        ),
         Index("ix_messages_source_id", "source_id"),
         Index("ix_messages_published_at", "published_at"),
         Index("ix_messages_content_hash", "content_hash"),
         Index("ix_messages_deleted_at", "deleted_at"),
+        Index("ix_messages_source_tg_message_id", "source_id", "tg_message_id"),
     )
 
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("telegram_sources.id", ondelete="CASCADE"),
@@ -173,9 +186,22 @@ class Message(UuidPkMixin, TimestampMixin, Base):
     raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     source: Mapped[TelegramSource] = relationship(back_populates="messages")
-    entities: Mapped[list[MessageEntity]] = relationship(back_populates="message")
-    classifications: Mapped[list[Classification]] = relationship(back_populates="message")
-    order: Mapped[Order | None] = relationship(back_populates="message")
+    entities: Mapped[list[MessageEntity]] = relationship(
+        back_populates="message",
+        primaryjoin="Message.id == MessageEntity.message_id",
+        foreign_keys="MessageEntity.message_id",
+    )
+    classifications: Mapped[list[Classification]] = relationship(
+        back_populates="message",
+        primaryjoin="Message.id == Classification.message_id",
+        foreign_keys="Classification.message_id",
+    )
+    order: Mapped[Order | None] = relationship(
+        back_populates="message",
+        primaryjoin="Message.id == Order.message_id",
+        foreign_keys="Order.message_id",
+        uselist=False,
+    )
 
 
 class Keyword(UuidPkMixin, TimestampMixin, Base):
@@ -220,17 +246,18 @@ class MessageEntity(UuidPkMixin, TimestampMixin, Base):
         Index("ix_message_entities_message_type", "message_id", "type"),
     )
 
-    message_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("messages.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    # Logical reference only: partitioned messages use PK (id, published_at).
+    message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     value_text: Mapped[str] = mapped_column(Text, nullable=False)
     value_norm: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
 
-    message: Mapped[Message] = relationship(back_populates="entities")
+    message: Mapped[Message] = relationship(
+        back_populates="entities",
+        primaryjoin="MessageEntity.message_id == Message.id",
+        foreign_keys="MessageEntity.message_id",
+    )
 
 
 class Classification(UuidPkMixin, TimestampMixin, Base):
@@ -247,11 +274,8 @@ class Classification(UuidPkMixin, TimestampMixin, Base):
         Index("ix_classifications_label", "label"),
     )
 
-    message_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("messages.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    # Logical reference only: partitioned messages use PK (id, published_at).
+    message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     label: Mapped[str] = mapped_column(String(32), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     method: Mapped[str] = mapped_column(String(16), nullable=False, default="rules")
@@ -259,7 +283,11 @@ class Classification(UuidPkMixin, TimestampMixin, Base):
     manual_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     explanation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
-    message: Mapped[Message] = relationship(back_populates="classifications")
+    message: Mapped[Message] = relationship(
+        back_populates="classifications",
+        primaryjoin="Classification.message_id == Message.id",
+        foreign_keys="Classification.message_id",
+    )
 
 
 class DuplicateGroup(UuidPkMixin, TimestampMixin, Base):
@@ -290,11 +318,8 @@ class Order(UuidPkMixin, TimestampMixin, Base):
         Index("ix_orders_duplicate_fingerprint", "duplicate_fingerprint"),
     )
 
-    message_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("messages.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    # Logical reference only: partitioned messages use PK (id, published_at).
+    message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("telegram_sources.id", ondelete="CASCADE"),
@@ -323,7 +348,11 @@ class Order(UuidPkMixin, TimestampMixin, Base):
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    message: Mapped[Message] = relationship(back_populates="order")
+    message: Mapped[Message] = relationship(
+        back_populates="order",
+        primaryjoin="Order.message_id == Message.id",
+        foreign_keys="Order.message_id",
+    )
     duplicate_group: Mapped[DuplicateGroup | None] = relationship(back_populates="orders")
     notification_deliveries: Mapped[list[NotificationDelivery]] = relationship(
         back_populates="order"

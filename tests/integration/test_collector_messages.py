@@ -308,6 +308,8 @@ async def test_floodwait_sets_source_pause_until(
     session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.models import TelegramAccount
+
     monkeypatch.setattr(collector_messages, "FloodWaitError", FakeFloodWaitError)
 
     class FloodWaitClient(FakeCollectorClient):
@@ -316,17 +318,28 @@ async def test_floodwait_sets_source_pause_until(
 
     async with session_factory() as session:
         source = await create_source(session)
+        account = TelegramAccount(
+            label="collector",
+            session_ref="collector",
+            status="active",
+        )
+        session.add(account)
+        await session.flush()
         result = await collect_with_client(
             session,
             FloodWaitClient([]),
             source,
+            account=account,
             enqueue_message_processing=None,
             correlation_id=None,
         )
+        await session.refresh(account)
 
         assert result.status == "floodwait"
         assert source.access_status == "floodwait"
         assert source.pause_until is not None
+        assert account.status == "floodwait"
+        assert account.floodwait_until is not None
 
 
 async def test_collection_skips_when_source_lease_is_locked() -> None:

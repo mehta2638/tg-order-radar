@@ -87,21 +87,44 @@ async def assert_schema_and_constraints(settings: Settings) -> None:
             "insert into telegram_sources (normalized_username) values ($1) returning id",
             "test_source",
         )
+        published_at = await connection.fetchval("select now()")
         await connection.execute(
             """
             insert into messages (source_id, tg_message_id, published_at, content_hash)
-            values ($1, 42, now(), 'hash-a')
+            values ($1, 42, $2, 'hash-a')
             """,
             source_id,
+            published_at,
         )
         with pytest.raises(asyncpg.UniqueViolationError):
             await connection.execute(
                 """
                 insert into messages (source_id, tg_message_id, published_at, content_hash)
-                values ($1, 42, now(), 'hash-b')
+                values ($1, 42, $2, 'hash-b')
                 """,
                 source_id,
+                published_at,
             )
+
+        partitioned = await connection.fetchval(
+            """
+            select c.relkind = 'p'
+            from pg_class c
+            join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relname = 'messages'
+            """
+        )
+        assert partitioned is True
+        child_partitions = await connection.fetchval(
+            """
+            select count(*)
+            from pg_inherits i
+            join pg_class c on c.oid = i.inhrelid
+            join pg_class p on p.oid = i.inhparent
+            where p.relname = 'messages'
+            """
+        )
+        assert child_partitions >= 1
     finally:
         await connection.close()
 

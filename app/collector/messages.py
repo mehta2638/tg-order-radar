@@ -11,11 +11,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from telethon.errors import FloodWaitError
 
-from app.collector.leases import RedisSourceLease, SourceLease
-from app.collector.telethon_client import get_authorized_client
+from app.collector.accounts import (
+    mark_account_floodwait,
+    resolve_account_for_source,
+    touch_account_used,
+)
+from app.collector.leases import RedisAccountLease, RedisSourceLease, SourceLease
+from app.collector.rate_limit import acquire_account_request_slot
+from app.collector.telethon_client import (
+    get_authorized_client,
+    get_authorized_client_for_account,
+)
 from app.core.config import get_settings
 from app.db.session import async_session_factory
-from app.models import Message, TelegramSource
+from app.models import Message, TelegramAccount, TelegramSource
 
 
 class TelegramCollectorClient(Protocol):
@@ -67,7 +76,7 @@ class MessageSnapshot:
 async def collect_source_messages(
     source_id: UUID,
     *,
-    client_factory: ClientFactory = get_authorized_client,
+    client_factory: ClientFactory | None = None,
     lease_factory: LeaseFactory | None = None,
     enqueue_message_processing: EnqueueMessageProcessing | None = None,
     correlation_id: str | None = None,
@@ -80,26 +89,68 @@ async def collect_source_messages(
         if not acquired:
             return CollectionResult(source_id=source_id, status="locked")
 
-        client = await client_factory()
-        try:
+        account: TelegramAccount | None = None
+        if client_factory is None:
             async with async_session_factory() as session:
-                source = await get_collectable_source(session, source_id)
-                if source is None:
-                    return CollectionResult(source_id=source_id, status="skipped")
+                account = await resolve_account_for_source(session, source_id)
+                await session.commit()
+            if account is not None:
+                if not await acquire_account_request_slot(account.id):
+                    return CollectionResult(source_id=source_id, status="rate_limited")
+                bound_account = account
+                async with RedisAccountLease(
+                    str(bound_account.id),
+                    settings.collector_account_lease_ttl_seconds,
+                ) as account_acquired:
+                    if not account_acquired:
+                        return CollectionResult(source_id=source_id, status="account_busy")
+                    return await _collect_with_resolved_client(
+                        source_id,
+                        client_factory=lambda: get_authorized_client_for_account(bound_account),
+                        account=bound_account,
+                        enqueue_message_processing=enqueue_message_processing,
+                        correlation_id=correlation_id,
+                    )
+            client_factory = get_authorized_client
 
-                now = now_utc()
-                if source.pause_until is not None and source.pause_until > now:
-                    return CollectionResult(source_id=source_id, status="paused")
+        return await _collect_with_resolved_client(
+            source_id,
+            client_factory=client_factory,
+            account=account,
+            enqueue_message_processing=enqueue_message_processing,
+            correlation_id=correlation_id,
+        )
 
-                return await collect_with_client(
-                    session,
-                    client,
-                    source,
-                    enqueue_message_processing=enqueue_message_processing,
-                    correlation_id=correlation_id,
-                )
-        finally:
-            await client.disconnect()
+
+async def _collect_with_resolved_client(
+    source_id: UUID,
+    *,
+    client_factory: ClientFactory,
+    account: TelegramAccount | None,
+    enqueue_message_processing: EnqueueMessageProcessing | None,
+    correlation_id: str | None,
+) -> CollectionResult:
+    client = await client_factory()
+    try:
+        async with async_session_factory() as session:
+            source = await get_collectable_source(session, source_id)
+            if source is None:
+                return CollectionResult(source_id=source_id, status="skipped")
+
+            now = now_utc()
+            if source.pause_until is not None and source.pause_until > now:
+                return CollectionResult(source_id=source_id, status="paused")
+
+            return await collect_with_client(
+                session,
+                client,
+                source,
+                account=account,
+                enqueue_message_processing=enqueue_message_processing,
+                correlation_id=correlation_id,
+            )
+    finally:
+        await client.disconnect()
 
 
 async def collect_with_client(
@@ -107,6 +158,7 @@ async def collect_with_client(
     client: TelegramCollectorClient,
     source: TelegramSource,
     *,
+    account: TelegramAccount | None = None,
     enqueue_message_processing: EnqueueMessageProcessing | None,
     correlation_id: str | None,
 ) -> CollectionResult:
@@ -118,8 +170,13 @@ async def collect_with_client(
         entity = await client.get_entity(username)
         snapshots = await fetch_message_snapshots(client, entity, source)
     except FloodWaitError as exc:
+        # Respect Telegram wait on both source and account. Do not switch accounts.
         source.access_status = "floodwait"
         source.pause_until = now_utc() + timedelta(seconds=exc.seconds)
+        if account is not None:
+            db_account = await session.get(TelegramAccount, account.id)
+            if db_account is not None:
+                await mark_account_floodwait(session, db_account, exc.seconds)
         await session.commit()
         return CollectionResult(source_id=source.id, status="floodwait")
 
@@ -149,6 +206,10 @@ async def collect_with_client(
 
     source.last_seen_message_id = max_seen
     source.last_checked_at = now_utc()
+    if account is not None:
+        db_account = await session.get(TelegramAccount, account.id)
+        if db_account is not None:
+            await touch_account_used(session, db_account)
     await session.commit()
 
     if enqueue_message_processing is not None:

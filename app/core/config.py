@@ -33,7 +33,12 @@ class Settings(BaseSettings):
     collector_backfill_days: int = 7
     collector_backfill_buffer_days: int = 1
     collector_lease_ttl_seconds: int = 600
+    collector_account_lease_ttl_seconds: int = 120
+    collector_max_requests_per_minute: int = 20
     collector_poll_interval_seconds: int = 60
+    messages_retention_days: int = 90
+    messages_partition_months_ahead: int = 2
+    messages_partition_months_behind: int = 1
     dictionary_cache_ttl_seconds: int = 300
     processing_fuzzy_enabled: bool = True
     classification_manual_review_min_confidence: float = 0.4
@@ -82,6 +87,9 @@ class Settings(BaseSettings):
     tg_phone: str | None = Field(default=None, repr=False)
     tg_session_dir: str = ".telegram-sessions"
     tg_session_name: str = "collector"
+    # Comma-separated session file names for multi-account load distribution.
+    # Empty => single account from tg_session_name. Never used to bypass FloodWait.
+    tg_session_names: str = ""
 
     @property
     def database_url(self) -> str:
