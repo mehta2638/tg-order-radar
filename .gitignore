@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 __pycache__/
 *.py[cod]
@@ -34,3 +35,15 @@ artifacts/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+
+# Backups, certificates, ACME state
+backups/
+*.sql
+*.sql.gz
+*.dump
+acme.json
+letsencrypt/
+*.pem
+*.crt
+*.key
+*.p12

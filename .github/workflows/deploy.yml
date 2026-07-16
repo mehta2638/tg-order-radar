@@ -1,0 +1,44 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type deploy to confirm'
+        required: true
+        default: ''
+      dry_run:
+        description: 'If true, only validate remote compose config'
+        required: true
+        default: 'true'
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirm == 'deploy'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Note
+        run: |
+          echo "This workflow is a template."
+          echo "Configure repository secrets before enabling real deploys:"
+          echo "  PROD_SSH_HOST, PROD_SSH_USER, PROD_SSH_KEY, PROD_APP_DIR"
+      - name: Dry-run guard
+        if: github.event.inputs.dry_run != 'false'
+        run: |
+          echo "dry_run=true: skipping SSH deploy (safe default)."
+          exit 0
+      - name: Deploy over SSH
+        if: github.event.inputs.dry_run == 'false'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.PROD_APP_DIR }}"
+            git fetch --prune
+            git checkout "${{ github.sha }}"
+            CONFIRM_DEPLOY=yes ENV_FILE=.env.production bash scripts/deploy.sh

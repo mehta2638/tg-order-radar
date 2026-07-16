@@ -1,0 +1,46 @@
+# Traefik static configuration for production.
+# ACME/Let's Encrypt is enabled only when TRAEFIK_ACME_ENABLED=true
+# and ACME_EMAIL / DOMAIN_* are provided by the operator.
+
+api:
+  dashboard: false
+
+ping: {}
+
+log:
+  level: INFO
+
+accessLog: {}
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls: {}
+      middlewares:
+        - security-headers@file
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: tg_order_radar_web
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+certificatesResolvers:
+  le:
+    acme:
+      email: "${ACME_EMAIL}"
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web

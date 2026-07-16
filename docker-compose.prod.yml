@@ -1,0 +1,471 @@
+# Production Compose for TG Order Radar.
+# Requires a host-local .env.production (never commit real secrets).
+# Do not use this file for destructive volume operations.
+
+name: tg-order-radar-prod
+
+x-app-env: &app-env
+  POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  TG_SESSION_DIR: /data/telegram-sessions
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  PROMETHEUS_ENABLED: ${PROMETHEUS_ENABLED:-true}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+  APP_VERSION: ${APP_VERSION:-0.1.0}
+  API_KEY_ADMIN: ${API_KEY_ADMIN:?API_KEY_ADMIN is required}
+  API_KEY_OPERATOR: ${API_KEY_OPERATOR:?API_KEY_OPERATOR is required}
+  API_KEY_VIEWER: ${API_KEY_VIEWER:?API_KEY_VIEWER is required}
+  BOT_TOKEN: ${BOT_TOKEN:-}
+  BOT_ALLOWED_USER_IDS: ${BOT_ALLOWED_USER_IDS:-}
+  TG_API_ID: ${TG_API_ID:-}
+  TG_API_HASH: ${TG_API_HASH:-}
+  TG_PHONE: ${TG_PHONE:-}
+  TG_SESSION_NAME: ${TG_SESSION_NAME:-collector}
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
+      POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--save",
+        "60",
+        "1000",
+        "--maxmemory-policy",
+        "noeviction",
+      ]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    build: *app-build
+    restart: "no"
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "true"
+    command: ["python", "-c", "print('migrations complete')"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build: *app-build
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "false"
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "*",
+      ]
+    volumes:
+      - telegram_sessions:/data/telegram-sessions:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+      - web
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://127.0.0.1:8000/health/live >/dev/null || exit 1",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=tg_order_radar_web
+      - traefik.http.routers.api.rule=Host(`${DOMAIN_APP:-app.example.com}`) && PathPrefix(`/api`)
+      - traefik.http.routers.api.entrypoints=websecure
+      - traefik.http.routers.api.tls=true
+      - traefik.http.routers.api.tls.certresolver=le
+      - traefik.http.routers.api.middlewares=security-headers@file,compress@file
+      - traefik.http.services.api.loadbalancer.server.port=8000
+      - traefik.http.routers.metrics.rule=Host(`${DOMAIN_APP:-app.example.com}`) && Path(`/metrics`)
+      - traefik.http.routers.metrics.entrypoints=websecure
+      - traefik.http.routers.metrics.tls=true
+      - traefik.http.routers.metrics.tls.certresolver=le
+      - traefik.http.routers.metrics.service=api
+      - traefik.http.routers.health.rule=Host(`${DOMAIN_APP:-app.example.com}`) && PathPrefix(`/health`)
+      - traefik.http.routers.health.entrypoints=websecure
+      - traefik.http.routers.health.tls=true
+      - traefik.http.routers.health.tls.certresolver=le
+      - traefik.http.routers.health.service=api
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://${DOMAIN_APP:-app.example.com}}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - web
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:3000 >/dev/null || exit 1",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=tg_order_radar_web
+      - traefik.http.routers.frontend.rule=Host(`${DOMAIN_APP:-app.example.com}`)
+      - traefik.http.routers.frontend.entrypoints=websecure
+      - traefik.http.routers.frontend.tls=true
+      - traefik.http.routers.frontend.tls.certresolver=le
+      - traefik.http.routers.frontend.middlewares=security-headers@file,compress@file
+      - traefik.http.services.frontend.loadbalancer.server.port=3000
+
+  collector:
+    build: *app-build
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "false"
+    command:
+      [
+        "python",
+        "-m",
+        "celery",
+        "-A",
+        "app.workers.celery_app:celery_app",
+        "worker",
+        "-Q",
+        "telegram_collection",
+        "--loglevel=INFO",
+        "--concurrency=1",
+      ]
+    volumes:
+      - telegram_sessions:/data/telegram-sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    build: *app-build
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "false"
+    command:
+      [
+        "python",
+        "-m",
+        "celery",
+        "-A",
+        "app.workers.celery_app:celery_app",
+        "worker",
+        "-Q",
+        "source_validation,message_processing,classification,duplicate_detection,notifications,maintenance",
+        "--loglevel=INFO",
+        "--concurrency=2",
+      ]
+    volumes:
+      - telegram_sessions:/data/telegram-sessions:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    security_opt:
+      - no-new-privileges:true
+
+  beat:
+    build: *app-build
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "false"
+    command:
+      [
+        "python",
+        "-m",
+        "celery",
+        "-A",
+        "app.workers.celery_app:celery_app",
+        "beat",
+        "--loglevel=INFO",
+      ]
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+
+  bot:
+    build: *app-build
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "false"
+    command: ["python", "-m", "app.bot.main"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://${DOMAIN_GRAFANA:-grafana.example.com}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - internal
+      - web
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=tg_order_radar_web
+      - traefik.http.routers.grafana.rule=Host(`${DOMAIN_GRAFANA:-grafana.example.com}`)
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls=true
+      - traefik.http.routers.grafana.tls.certresolver=le
+      - traefik.http.routers.grafana.middlewares=security-headers@file
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=tg_order_radar_web
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=${ACME_EMAIL:-ops@example.com}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --ping=true
+      - --api.dashboard=false
+      - --log.level=INFO
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./deploy/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - letsencrypt_data:/letsencrypt
+    networks:
+      - web
+    depends_on:
+      - api
+      - frontend
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+
+  backup:
+    image: pgvector/pgvector:pg16
+    profiles: ["backup"]
+    restart: "no"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
+      POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      BACKUP_DIR: /backups
+      SESSION_ENC_KEY: ${SESSION_ENC_KEY:-}
+    volumes:
+      - ./backups:/backups
+      - telegram_sessions:/sessions:ro
+      - ./scripts:/scripts:ro
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/scripts/backup_postgres.sh"]
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  internal:
+    name: tg_order_radar_internal
+    internal: true
+  web:
+    name: tg_order_radar_web
+
+volumes:
+  postgres_data:
+  redis_data:
+  telegram_sessions:
+  prometheus_data:
+  grafana_data:
+  letsencrypt_data:

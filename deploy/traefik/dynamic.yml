@@ -1,0 +1,25 @@
+http:
+  middlewares:
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        permissionsPolicy: "geolocation=(), microphone=(), camera=()"
+    api-strip-prefix:
+      stripPrefix:
+        prefixes:
+          - /api
+    compress:
+      compress: {}
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true

@@ -1,0 +1,47 @@
+# Local-safe override for validating production Compose without ACME/TLS issuance.
+# Usage:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.local.yml --env-file .env.production.example config
+# Do not use for real public deployment.
+
+services:
+  traefik:
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=tg_order_radar_web
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --ping=true
+      - --api.dashboard=false
+      - --log.level=INFO
+    ports:
+      - "8088:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./deploy/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+
+  api:
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=tg_order_radar_web
+      - traefik.http.routers.api.rule=PathPrefix(`/api`) || PathPrefix(`/health`) || Path(`/metrics`)
+      - traefik.http.routers.api.entrypoints=web
+      - traefik.http.services.api.loadbalancer.server.port=8000
+
+  frontend:
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=tg_order_radar_web
+      - traefik.http.routers.frontend.rule=PathPrefix(`/`)
+      - traefik.http.routers.frontend.entrypoints=web
+      - traefik.http.services.frontend.loadbalancer.server.port=3000
+
+  grafana:
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=tg_order_radar_web
+      - traefik.http.routers.grafana.rule=Host(`grafana.localhost`)
+      - traefik.http.routers.grafana.entrypoints=web
+      - traefik.http.services.grafana.loadbalancer.server.port=3000

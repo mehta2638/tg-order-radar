@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 __pycache__/
 *.py[cod]
@@ -20,3 +21,13 @@ sessions/
 .git/
 .idea/
 .vscode/
+backups/
+*.sql
+*.sql.gz
+acme.json
+letsencrypt/
+*.pem
+*.crt
+*.key
+frontend/node_modules/
+frontend/.next/

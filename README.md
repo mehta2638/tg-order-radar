@@ -78,6 +78,21 @@ Source endpoints:
 - `DELETE http://localhost:8000/api/v1/sources/{id}` disables collection for the source
 - `POST http://localhost:8000/api/v1/sources/{id}/validate` checks public read access through Telethon
 
+## Production
+
+See `docs/production-deployment.md` for Traefik/TLS Compose, secrets, backup/restore, deploy and rollback.
+
+Quick validation (no live deploy, no ACME):
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production.example config
+docker compose -f docker-compose.prod.yml --env-file .env.production.example build
+bash scripts/validate_shell_scripts.sh
+bash scripts/test_backup_restore.sh
+```
+
+VPS hardening checklist: `docs/vps-hardening.md`. Runbooks: `docs/runbooks/`.
+
 ## Telegram Authorization
 
 Only public channels and groups are supported. The userbot account is used for read-only validation and later collection; the application does not send messages through it.
