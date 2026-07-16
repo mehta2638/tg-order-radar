@@ -31,7 +31,7 @@ jobs:
           exit 0
       - name: Deploy over SSH
         if: github.event.inputs.dry_run == 'false'
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.PROD_SSH_HOST }}
           username: ${{ secrets.PROD_SSH_USER }}
