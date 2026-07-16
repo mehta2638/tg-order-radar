@@ -1,0 +1,52 @@
+groups:
+  - name: tg-order-radar
+    rules:
+      - alert: MessageProcessingQueueHigh
+        expr: queue_size{queue="message_processing"} > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Message processing queue is deep
+          description: queue_size message_processing has been above 5000 for 5 minutes.
+
+      - alert: CollectorLagHigh
+        expr: collector_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Collector lag is high
+          description: collector_lag_seconds has been above 300 for 5 minutes.
+
+      - alert: FailedTasksGrowing
+        expr: increase(failed_tasks[10m]) > 0 or failed_tasks > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Dead-letter failed tasks are elevated
+          description: failed_tasks gauge indicates DLQ growth.
+
+      - alert: ClassificationLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(classification_latency_seconds_bucket[5m])) by (le)) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Classification p95 latency is high
+          description: classification_latency_seconds p95 exceeded 5 seconds.
+
+      - alert: NotificationFailureRateHigh
+        expr: |
+          (
+            sum(rate(notifications_sent_total{status="failed"}[10m]))
+            /
+            clamp_min(sum(rate(notifications_sent_total[10m])), 1)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Notification failure rate above 5%
+          description: Failed notification deliveries exceed 5% over 10 minutes.

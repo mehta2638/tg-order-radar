@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     bot_rate_limit_seconds: float = 0.2
     bot_send_max_retries: int = 3
 
+    app_version: str = "0.1.0"
+    prometheus_enabled: bool = True
+    sentry_dsn: str | None = Field(default=None, repr=False)
+    sentry_traces_sample_rate: float = 0.0
+
     tg_api_id: int | None = Field(default=None, repr=False)
     tg_api_hash: str | None = Field(default=None, repr=False)
     tg_phone: str | None = Field(default=None, repr=False)

@@ -19,6 +19,11 @@ from app.classification.rules import (
 from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models import Classification, Message, MessageEntity, Order
+from app.monitoring.metrics import (
+    CLASSIFICATION_LATENCY_SECONDS,
+    observe_duration,
+    record_order_found,
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,18 @@ async def classify_message(
 
 
 async def classify_message_in_session(
+    session: AsyncSession,
+    message_id: UUID,
+) -> OrderClassificationResult:
+    with observe_duration(CLASSIFICATION_LATENCY_SECONDS):
+        result = await _classify_message_in_session(session, message_id)
+    if result.order_id is not None:
+        order = await session.get(Order, result.order_id)
+        record_order_found(order.project_type if order is not None else None)
+    return result
+
+
+async def _classify_message_in_session(
     session: AsyncSession,
     message_id: UUID,
 ) -> OrderClassificationResult:

@@ -10,6 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models import Message, MessageEntity
+from app.monitoring.metrics import (
+    MESSAGE_PROCESSING_SECONDS,
+    observe_duration,
+    record_message_processed,
+)
 from app.processing.extractors import ExtractedEntity
 from app.processing.keywords import KeywordHit, compile_keyword_rules
 from app.processing.pipeline import PrefilterResult, process_text
@@ -42,6 +47,16 @@ async def process_message(
 
 
 async def process_message_in_session(
+    session: AsyncSession,
+    message_id: UUID,
+) -> MessageProcessingResult:
+    with observe_duration(MESSAGE_PROCESSING_SECONDS):
+        result = await _process_message_in_session(session, message_id)
+    record_message_processed(result.status)
+    return result
+
+
+async def _process_message_in_session(
     session: AsyncSession,
     message_id: UUID,
 ) -> MessageProcessingResult:

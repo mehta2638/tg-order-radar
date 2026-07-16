@@ -54,6 +54,20 @@ Health endpoints:
 
 - `GET http://localhost:8000/health/live`
 - `GET http://localhost:8000/health/ready`
+- `GET http://localhost:8000/metrics` (Prometheus)
+
+Monitoring stack:
+
+```bash
+docker compose up -d prometheus grafana
+```
+
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001` (default `admin` / `admin`)
+- Alert rules: `monitoring/alerts.yml`
+- Dashboard: provisioned as **TG Order Radar Overview**
+
+Sentry is optional. Leave `SENTRY_DSN` empty locally; set it in production to enable exception reporting for API, workers and bot.
 
 Source endpoints:
 

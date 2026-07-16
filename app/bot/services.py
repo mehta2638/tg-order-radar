@@ -24,6 +24,7 @@ from app.models import (
     TelegramSource,
     User,
 )
+from app.monitoring.metrics import record_notification
 from app.services.audit import add_audit_log
 from app.services.favorites import add_favorite
 from app.services.orders import update_order_status
@@ -161,6 +162,10 @@ async def send_order_notification(
         await session.commit()
         await asyncio.sleep(settings.bot_rate_limit_seconds)
 
+    record_notification("sent", sent)
+    record_notification("skipped", skipped)
+    record_notification("failed", failed)
+    record_notification("deferred", deferred)
     return NotificationResult(
         order_id=order_id,
         status="processed",

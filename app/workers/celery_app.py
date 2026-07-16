@@ -8,6 +8,7 @@ from kombu import Exchange, Queue
 
 from app.core.config import get_settings
 from app.core.correlation import get_correlation_id
+from app.monitoring.sentry import init_sentry
 from app.workers.dead_letter import record_failed_task
 from app.workers.queues import (
     CLASSIFICATION_QUEUE,
@@ -21,6 +22,7 @@ from app.workers.queues import (
 )
 
 settings = get_settings()
+init_sentry(settings, service_name="worker")
 
 
 class BaseTaskWithRetry(Task):  # type: ignore[misc]

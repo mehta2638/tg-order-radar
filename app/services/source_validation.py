@@ -16,6 +16,7 @@ from app.collector.telethon_client import (
 )
 from app.core.errors import ApiError
 from app.models import TelegramSource
+from app.monitoring.metrics import record_telegram_error
 from app.services.audit import add_audit_log
 from app.services.sources import get_source
 
@@ -69,10 +70,13 @@ async def validate_source(
         apply_successful_validation(source, entity)
         await commit_validation_result(session, source, {"access_status": "ok"})
     except UsernameNotOccupiedError:
+        record_telegram_error("not_found")
         await apply_failed_validation(session, source, "not_found")
     except ChannelPrivateError:
+        record_telegram_error("private")
         await apply_failed_validation(session, source, "private")
     except FloodWaitError as exc:
+        record_telegram_error("floodwait")
         source.access_status = "floodwait"
         source.is_public = False
         source.pause_until = now_utc() + timedelta(seconds=exc.seconds)
@@ -83,6 +87,7 @@ async def validate_source(
             {"access_status": "floodwait", "seconds": exc.seconds},
         )
     except (OSError, ConnectionError, RPCError) as exc:
+        record_telegram_error("rpc_error")
         source.access_status = "error"
         source.is_public = False
         source.last_checked_at = now_utc()

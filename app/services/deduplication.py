@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models import DuplicateGroup, Message, Order
+from app.monitoring.metrics import record_duplicate
 from app.services.audit import add_audit_log
 from app.services.semantic_deduplication import find_semantic_duplicate
 
@@ -104,6 +105,7 @@ async def detect_duplicates_in_session(
                     "comparisons": semantic_result.comparisons,
                 },
             )
+            record_duplicate("semantic")
             return DeduplicationResult(
                 order_id=order.id,
                 status="duplicate_grouped",
@@ -161,6 +163,7 @@ async def detect_duplicates_in_session(
         canonical_candidate.order_id,
         method,
     )
+    record_duplicate(method)
     return DeduplicationResult(
         order_id=order.id,
         status="duplicate_grouped",
