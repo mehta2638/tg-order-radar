@@ -9,7 +9,9 @@ import type {
   OrderStatus,
   Source,
   SourceListResponse,
-  StatsSummary
+  StatsSummary,
+  Subscription,
+  SubscriptionPayload
 } from "@/lib/types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000";
@@ -134,6 +136,52 @@ export class ApiClient {
 
   async getStatsSummary(): Promise<StatsSummary> {
     return this.request<StatsSummary>("/api/v1/stats/summary");
+  }
+
+  async getSubscriptions(params?: { user_id?: string; all_users?: boolean }): Promise<{
+    items: Subscription[];
+    total: number;
+  }> {
+    return this.request<{ items: Subscription[]; total: number }>(
+      `/api/v1/subscriptions${queryString(params ?? {})}`
+    );
+  }
+
+  async getSubscription(subscriptionId: string): Promise<Subscription> {
+    return this.request<Subscription>(`/api/v1/subscriptions/${subscriptionId}`);
+  }
+
+  async createSubscription(payload: SubscriptionPayload): Promise<Subscription> {
+    return this.request<Subscription>("/api/v1/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async updateSubscription(
+    subscriptionId: string,
+    payload: Partial<SubscriptionPayload>
+  ): Promise<Subscription> {
+    return this.request<Subscription>(`/api/v1/subscriptions/${subscriptionId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  async deleteSubscription(subscriptionId: string): Promise<void> {
+    await this.request<void>(`/api/v1/subscriptions/${subscriptionId}`, { method: "DELETE" });
+  }
+
+  async enableSubscription(subscriptionId: string): Promise<Subscription> {
+    return this.request<Subscription>(`/api/v1/subscriptions/${subscriptionId}/enable`, {
+      method: "POST"
+    });
+  }
+
+  async disableSubscription(subscriptionId: string): Promise<Subscription> {
+    return this.request<Subscription>(`/api/v1/subscriptions/${subscriptionId}/disable`, {
+      method: "POST"
+    });
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

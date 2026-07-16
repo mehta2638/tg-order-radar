@@ -23,13 +23,22 @@ from sqlalchemy.ext.asyncio import (
 from app.bot.services import (
     add_order_to_favorites_from_bot,
     change_order_status_from_bot,
+    get_or_create_bot_user,
     send_order_notification,
 )
 from app.collector.messages import collect_with_client
 from app.core.config import Settings, get_settings
 from app.db.session import get_session
 from app.main import create_app
-from app.models import Favorite, Keyword, Message, NegativeKeyword, NotificationDelivery, Order
+from app.models import (
+    Favorite,
+    Keyword,
+    Message,
+    NegativeKeyword,
+    NotificationDelivery,
+    NotificationSubscription,
+    Order,
+)
 from app.services.deduplication import detect_duplicates_in_session
 from app.services.dictionaries import invalidate_dictionary_cache
 from app.services.message_processing import process_message_in_session
@@ -263,6 +272,23 @@ async def test_mvp_flow_from_source_to_bot_and_api(
         assert classification.order_id is not None
         deduplication = await detect_duplicates_in_session(session, classification.order_id)
         assert deduplication.is_canonical is True
+
+        bot_user = await get_or_create_bot_user(session, BOT_USER_ID)
+        session.add(
+            NotificationSubscription(
+                user_id=bot_user.id,
+                name="e2e-default",
+                enabled=True,
+                project_types=[],
+                currencies=[],
+                source_ids=[],
+                positive_keywords=[],
+                negative_keywords=[],
+                timezone="UTC",
+                rate_limit_period_minutes=60,
+            )
+        )
+        await session.commit()
 
         delivery = await send_order_notification(
             session,

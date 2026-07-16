@@ -60,6 +60,9 @@ class User(UuidPkMixin, TimestampMixin, Base):
     tg_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     favorites: Mapped[list[Favorite]] = relationship(back_populates="user")
+    notification_subscriptions: Mapped[list[NotificationSubscription]] = relationship(
+        back_populates="user"
+    )
 
 
 class TelegramAccount(UuidPkMixin, TimestampMixin, Base):
@@ -333,8 +336,12 @@ class NotificationDelivery(UuidPkMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("order_id", "user_id", "channel", name="uq_notification_delivery_target"),
         CheckConstraint("channel in ('bot')", name="channel"),
-        CheckConstraint("status in ('queued','sent','failed','skipped')", name="status"),
+        CheckConstraint(
+            "status in ('queued','sent','failed','skipped','deferred')",
+            name="status",
+        ),
         Index("ix_notification_deliveries_status", "status"),
+        Index("ix_notification_deliveries_scheduled_for", "scheduled_for"),
     )
 
     order_id: Mapped[uuid.UUID] = mapped_column(
@@ -347,13 +354,80 @@ class NotificationDelivery(UuidPkMixin, TimestampMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    subscription_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("notification_subscriptions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     channel: Mapped[str] = mapped_column(String(16), nullable=False, default="bot")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     dedup_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     order: Mapped[Order] = relationship(back_populates="notification_deliveries")
+    subscription: Mapped[NotificationSubscription | None] = relationship(
+        back_populates="deliveries"
+    )
+
+
+class NotificationSubscription(UuidPkMixin, TimestampMixin, Base):
+    __tablename__ = "notification_subscriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "min_relevance_score is null or (min_relevance_score between 0 and 100)",
+            name="ck_notification_subscriptions_min_relevance",
+        ),
+        CheckConstraint(
+            "budget_min is null or budget_max is null or budget_min <= budget_max",
+            name="ck_notification_subscriptions_budget_range",
+        ),
+        CheckConstraint(
+            "freshness_days is null or freshness_days >= 1",
+            name="ck_notification_subscriptions_freshness",
+        ),
+        CheckConstraint(
+            "max_notifications_per_period is null or max_notifications_per_period >= 1",
+            name="ck_notification_subscriptions_rate_limit",
+        ),
+        CheckConstraint(
+            "rate_limit_period_minutes >= 1",
+            name="ck_notification_subscriptions_rate_period",
+        ),
+        CheckConstraint(
+            "similar_cooldown_minutes is null or similar_cooldown_minutes >= 1",
+            name="ck_notification_subscriptions_cooldown",
+        ),
+        Index("ix_notification_subscriptions_user_id", "user_id"),
+        Index("ix_notification_subscriptions_enabled", "enabled"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    min_relevance_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    project_types: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    budget_min: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    budget_max: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    currencies: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    source_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    positive_keywords: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    negative_keywords: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    quiet_hours_start: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    quiet_hours_end: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    freshness_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_notifications_per_period: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rate_limit_period_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    similar_cooldown_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="notification_subscriptions")
+    deliveries: Mapped[list[NotificationDelivery]] = relationship(back_populates="subscription")
 
 
 class Favorite(UuidPkMixin, TimestampMixin, Base):

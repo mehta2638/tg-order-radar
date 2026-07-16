@@ -8,7 +8,7 @@ from uuid import UUID
 
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import ApiPrincipal
@@ -19,6 +19,7 @@ from app.models import (
     DuplicateGroup,
     Message,
     NotificationDelivery,
+    NotificationSubscription,
     Order,
     TelegramSource,
     User,
@@ -26,6 +27,11 @@ from app.models import (
 from app.services.audit import add_audit_log
 from app.services.favorites import add_favorite
 from app.services.orders import update_order_status
+from app.services.subscription_matching import (
+    is_in_quiet_hours,
+    next_quiet_hours_end,
+    subscription_matches_order,
+)
 
 
 class BotSender(Protocol):
@@ -53,6 +59,7 @@ class NotificationResult:
     sent: int = 0
     skipped: int = 0
     failed: int = 0
+    deferred: int = 0
 
 
 async def send_order_notification(
@@ -66,6 +73,11 @@ async def send_order_notification(
     if card is None:
         return NotificationResult(order_id=order_id, status="skipped")
 
+    order = await session.get(Order, order_id)
+    if order is None:
+        return NotificationResult(order_id=order_id, status="skipped")
+    message = await session.get(Message, order.message_id)
+
     recipients = await resolve_bot_recipients(session, settings)
     if not recipients:
         return NotificationResult(order_id=order_id, status="no_recipients")
@@ -73,10 +85,57 @@ async def send_order_notification(
     sent = 0
     skipped = 0
     failed = 0
+    deferred = 0
+    now = datetime.now(UTC)
     for recipient in recipients:
-        delivery, created = await get_or_create_delivery(session, order_id, recipient.user.id)
-        if not created:
+        subscription = await find_matching_subscription(
+            session, recipient.user, order, message, now=now
+        )
+        if subscription is None:
             skipped += 1
+            continue
+
+        if await is_rate_limited(session, recipient.user.id, subscription, now=now):
+            skipped += 1
+            continue
+        if await is_similar_cooldown_active(
+            session, recipient.user.id, order, subscription, now=now
+        ):
+            skipped += 1
+            continue
+
+        delivery, created = await get_or_create_delivery(
+            session,
+            order_id,
+            recipient.user.id,
+            subscription_id=subscription.id,
+        )
+        if not created:
+            if delivery.status == "deferred" and (
+                delivery.scheduled_for is None or delivery.scheduled_for <= now
+            ):
+                pass
+            else:
+                skipped += 1
+                continue
+
+        if is_in_quiet_hours(
+            now,
+            start=subscription.quiet_hours_start,
+            end=subscription.quiet_hours_end,
+            timezone_name=subscription.timezone,
+        ):
+            scheduled_for = next_quiet_hours_end(
+                now,
+                start=subscription.quiet_hours_start,
+                end=subscription.quiet_hours_end,
+                timezone_name=subscription.timezone,
+            )
+            delivery.status = "deferred"
+            delivery.scheduled_for = scheduled_for
+            delivery.subscription_id = subscription.id
+            deferred += 1
+            await session.commit()
             continue
 
         try:
@@ -94,14 +153,158 @@ async def send_order_notification(
         else:
             delivery.status = "sent"
             delivery.sent_at = datetime.now(UTC)
+            delivery.scheduled_for = None
+            delivery.subscription_id = subscription.id
             delivery.error = None
+            order.notified_at = delivery.sent_at
             sent += 1
         await session.commit()
         await asyncio.sleep(settings.bot_rate_limit_seconds)
 
     return NotificationResult(
-        order_id=order_id, status="processed", sent=sent, skipped=skipped, failed=failed
+        order_id=order_id,
+        status="processed",
+        sent=sent,
+        skipped=skipped,
+        failed=failed,
+        deferred=deferred,
     )
+
+
+async def process_deferred_notifications(
+    session: AsyncSession,
+    sender: BotSender,
+    settings: Settings | None = None,
+) -> dict[str, int]:
+    settings = settings or get_settings()
+    now = datetime.now(UTC)
+    deliveries = list(
+        await session.scalars(
+            select(NotificationDelivery)
+            .where(
+                NotificationDelivery.status == "deferred",
+                NotificationDelivery.scheduled_for.is_not(None),
+                NotificationDelivery.scheduled_for <= now,
+            )
+            .order_by(NotificationDelivery.scheduled_for.asc())
+            .limit(100)
+        )
+    )
+    sent = 0
+    failed = 0
+    skipped = 0
+    for delivery in deliveries:
+        card = await get_notifiable_order_card(session, delivery.order_id, settings)
+        user = await session.get(User, delivery.user_id)
+        if card is None or user is None or user.tg_chat_id is None or not user.is_active:
+            delivery.status = "skipped"
+            skipped += 1
+            await session.commit()
+            continue
+        try:
+            await send_with_retry(
+                sender,
+                int(user.tg_chat_id),
+                render_order_card(card),
+                build_order_keyboard(card),
+                settings,
+            )
+        except Exception as exc:  # noqa: BLE001
+            delivery.status = "failed"
+            delivery.error = str(exc)[:2000]
+            failed += 1
+        else:
+            delivery.status = "sent"
+            delivery.sent_at = datetime.now(UTC)
+            delivery.scheduled_for = None
+            delivery.error = None
+            order = await session.get(Order, delivery.order_id)
+            if order is not None:
+                order.notified_at = delivery.sent_at
+            sent += 1
+        await session.commit()
+        await asyncio.sleep(settings.bot_rate_limit_seconds)
+    return {"sent": sent, "failed": failed, "skipped": skipped, "processed": len(deliveries)}
+
+
+async def find_matching_subscription(
+    session: AsyncSession,
+    user: User,
+    order: Order,
+    message: Message | None,
+    *,
+    now: datetime | None = None,
+) -> NotificationSubscription | None:
+    subscriptions = list(
+        await session.scalars(
+            select(NotificationSubscription).where(
+                NotificationSubscription.user_id == user.id,
+                NotificationSubscription.enabled.is_(True),
+            )
+        )
+    )
+    if not subscriptions:
+        return None
+    active_now = now or datetime.now(UTC)
+    matches = [
+        subscription
+        for subscription in subscriptions
+        if subscription_matches_order(subscription, order, message, now_utc=active_now)
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda item: (item.created_at, str(item.id)))
+    return matches[0]
+
+
+async def is_rate_limited(
+    session: AsyncSession,
+    user_id: UUID,
+    subscription: NotificationSubscription,
+    *,
+    now: datetime,
+) -> bool:
+    if subscription.max_notifications_per_period is None:
+        return False
+    cutoff = now - timedelta(minutes=subscription.rate_limit_period_minutes)
+    count = await session.scalar(
+        select(func.count())
+        .select_from(NotificationDelivery)
+        .where(
+            NotificationDelivery.user_id == user_id,
+            NotificationDelivery.status == "sent",
+            NotificationDelivery.sent_at.is_not(None),
+            NotificationDelivery.sent_at >= cutoff,
+        )
+    )
+    return int(count or 0) >= subscription.max_notifications_per_period
+
+
+async def is_similar_cooldown_active(
+    session: AsyncSession,
+    user_id: UUID,
+    order: Order,
+    subscription: NotificationSubscription,
+    *,
+    now: datetime,
+) -> bool:
+    if subscription.similar_cooldown_minutes is None or not order.duplicate_fingerprint:
+        return False
+    cutoff = now - timedelta(minutes=subscription.similar_cooldown_minutes)
+    existing = await session.scalar(
+        select(NotificationDelivery.id)
+        .join(Order, Order.id == NotificationDelivery.order_id)
+        .where(
+            NotificationDelivery.user_id == user_id,
+            NotificationDelivery.status == "sent",
+            NotificationDelivery.sent_at.is_not(None),
+            NotificationDelivery.sent_at >= cutoff,
+            Order.duplicate_fingerprint == order.duplicate_fingerprint,
+            Order.id != order.id,
+        )
+        .limit(1)
+    )
+    return existing is not None
 
 
 async def get_notifiable_order_card(
@@ -164,10 +367,12 @@ async def resolve_bot_recipients(session: AsyncSession, settings: Settings) -> l
         )
     )
     for user in db_users:
-        if user.tg_chat_id is not None:
-            recipients_by_chat_id[int(user.tg_chat_id)] = BotRecipient(
-                user=user, tg_chat_id=int(user.tg_chat_id)
-            )
+        if user.tg_chat_id is None:
+            continue
+        chat_id = int(user.tg_chat_id)
+        if env_ids and chat_id not in env_ids:
+            continue
+        recipients_by_chat_id[chat_id] = BotRecipient(user=user, tg_chat_id=chat_id)
 
     for tg_chat_id in env_ids:
         if tg_chat_id in recipients_by_chat_id:
@@ -200,6 +405,8 @@ async def get_or_create_delivery(
     session: AsyncSession,
     order_id: UUID,
     user_id: UUID,
+    *,
+    subscription_id: UUID | None = None,
 ) -> tuple[NotificationDelivery, bool]:
     result = await session.scalars(
         select(NotificationDelivery).where(
@@ -218,6 +425,7 @@ async def get_or_create_delivery(
         channel="bot",
         status="queued",
         dedup_key=f"bot:{order_id}:{user_id}",
+        subscription_id=subscription_id,
     )
     session.add(delivery)
     await session.flush()
@@ -302,3 +510,60 @@ async def change_order_status_from_bot(
     )
     await session.commit()
     return "Статус обновлен."
+
+
+def summarize_subscription(subscription: NotificationSubscription) -> str:
+    parts = [f"#{str(subscription.id)[:8]}", subscription.name]
+    parts.append("on" if subscription.enabled else "off")
+    if subscription.min_relevance_score is not None:
+        parts.append(f"rel>={subscription.min_relevance_score}")
+    if subscription.project_types:
+        parts.append("types=" + ",".join(str(item) for item in subscription.project_types[:5]))
+    if subscription.quiet_hours_start and subscription.quiet_hours_end:
+        parts.append(
+            f"quiet {subscription.quiet_hours_start}-{subscription.quiet_hours_end}"
+            f" {subscription.timezone}"
+        )
+    return " | ".join(parts)
+
+
+async def list_bot_subscriptions(session: AsyncSession, tg_user_id: int) -> str:
+    user = await get_authorized_bot_user(session, tg_user_id)
+    if user is None:
+        return "Нет доступа."
+    subscriptions = list(
+        await session.scalars(
+            select(NotificationSubscription)
+            .where(NotificationSubscription.user_id == user.id)
+            .order_by(NotificationSubscription.created_at.desc())
+        )
+    )
+    if not subscriptions:
+        return "Подписок нет. Создайте через API /admin frontend."
+    lines = ["Ваши подписки:"]
+    lines.extend(summarize_subscription(item) for item in subscriptions)
+    return "\n".join(lines)
+
+
+async def set_bot_subscription_enabled(
+    session: AsyncSession,
+    tg_user_id: int,
+    subscription_id: UUID,
+    enabled: bool,
+) -> str:
+    user = await get_authorized_bot_user(session, tg_user_id)
+    if user is None:
+        return "Нет доступа."
+    subscription = await session.get(NotificationSubscription, subscription_id)
+    if subscription is None or subscription.user_id != user.id:
+        return "Подписка не найдена."
+    subscription.enabled = enabled
+    await add_audit_log(
+        session,
+        action="subscription.enable" if enabled else "subscription.disable",
+        entity="notification_subscription",
+        entity_id=subscription.id,
+        payload={"tg_user_id": tg_user_id, "enabled": enabled},
+    )
+    await session.commit()
+    return f"Подписка {'включена' if enabled else 'выключена'}."

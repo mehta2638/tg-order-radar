@@ -11,6 +11,7 @@ const navItems = [
   { href: "/moderation", label: "Moderation" },
   { href: "/sources", label: "Sources" },
   { href: "/keywords", label: "Keywords" },
+  { href: "/subscriptions", label: "Subscriptions" },
   { href: "/statistics", label: "Statistics" }
 ];
 

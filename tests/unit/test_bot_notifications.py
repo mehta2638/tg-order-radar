@@ -118,13 +118,40 @@ async def test_send_order_notification_skips_existing_delivery(
     async def fake_delivery(*args: object, **kwargs: object) -> tuple[NotificationDelivery, bool]:
         return delivery, False
 
+    async def fake_match(*args: object, **kwargs: object) -> object:
+        return type("Sub", (), {"id": uuid4()})()
+
+    class FakeSession:
+        async def get(self, model: object, entity_id: object) -> Order | None:
+            if model is Order:
+                return Order(
+                    id=order_id,
+                    message_id=uuid4(),
+                    source_id=uuid4(),
+                    published_at=datetime.now(UTC),
+                    relevance_score=90,
+                    status="new",
+                    is_fresh=True,
+                )
+            return None
+
+        async def commit(self) -> None:
+            return None
+
     monkeypatch.setattr(services, "get_notifiable_order_card", fake_card)
     monkeypatch.setattr(services, "resolve_bot_recipients", fake_recipients)
     monkeypatch.setattr(services, "get_or_create_delivery", fake_delivery)
+    monkeypatch.setattr(services, "find_matching_subscription", fake_match)
+
+    async def fake_rate(*args: object, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(services, "is_rate_limited", fake_rate)
+    monkeypatch.setattr(services, "is_similar_cooldown_active", fake_rate)
 
     sender = FakeSender()
     result = await services.send_order_notification(
-        session=object(),
+        session=FakeSession(),
         order_id=order_id,
         sender=sender,
         settings=Settings(bot_rate_limit_seconds=0, bot_send_max_retries=1),
@@ -162,13 +189,45 @@ async def test_send_order_notification_sends_new_delivery(monkeypatch: pytest.Mo
     async def fake_delivery(*args: object, **kwargs: object) -> tuple[NotificationDelivery, bool]:
         return delivery, True
 
+    async def fake_match(*args: object, **kwargs: object) -> object:
+        return type(
+            "Sub",
+            (),
+            {
+                "id": uuid4(),
+                "quiet_hours_start": None,
+                "quiet_hours_end": None,
+                "timezone": "UTC",
+            },
+        )()
+
     class FakeSession:
+        async def get(self, model: object, entity_id: object) -> Order | None:
+            if model is Order:
+                return Order(
+                    id=order_id,
+                    message_id=uuid4(),
+                    source_id=uuid4(),
+                    published_at=datetime.now(UTC),
+                    relevance_score=90,
+                    status="new",
+                    is_fresh=True,
+                )
+            return None
+
         async def commit(self) -> None:
             return None
 
     monkeypatch.setattr(services, "get_notifiable_order_card", fake_card)
     monkeypatch.setattr(services, "resolve_bot_recipients", fake_recipients)
     monkeypatch.setattr(services, "get_or_create_delivery", fake_delivery)
+    monkeypatch.setattr(services, "find_matching_subscription", fake_match)
+
+    async def fake_rate(*args: object, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(services, "is_rate_limited", fake_rate)
+    monkeypatch.setattr(services, "is_similar_cooldown_active", fake_rate)
 
     sender = FakeSender()
     result = await services.send_order_notification(

@@ -9,7 +9,7 @@ from uuid import UUID
 from aiogram import Bot
 from sqlalchemy import and_, select, update
 
-from app.bot.services import send_order_notification
+from app.bot.services import process_deferred_notifications, send_order_notification
 from app.collector.messages import collect_source_messages
 from app.core.config import get_settings
 from app.db.session import async_session_factory
@@ -266,4 +266,26 @@ async def _send_notification_task(order_id: UUID) -> dict[str, int | str]:
         "sent": result.sent,
         "skipped": result.skipped,
         "failed": result.failed,
+        "deferred": result.deferred,
     }
+
+
+@celery_app.task(name="app.workers.tasks.process_deferred_notifications_task")
+def process_deferred_notifications_task(
+    correlation_id: str | None = None,
+) -> dict[str, int | str]:
+    return run_async(_process_deferred_notifications_task())
+
+
+async def _process_deferred_notifications_task() -> dict[str, int | str]:
+    settings = get_settings()
+    if not settings.bot_token:
+        return {"stage": "notifications", "status": "skipped"}
+
+    bot = Bot(token=settings.bot_token)
+    try:
+        async with async_session_factory() as session:
+            result = await process_deferred_notifications(session, bot, settings)
+    finally:
+        await bot.session.close()
+    return {"stage": "notifications", "status": "processed", **result}

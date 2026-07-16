@@ -4,14 +4,14 @@ import asyncio
 
 from aiogram import Bot, Dispatcher
 
-from app.bot.handlers import router as callbacks_router
+from app.bot.handlers import router as bot_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
 
 def create_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
-    dispatcher.include_router(callbacks_router)
+    dispatcher.include_router(bot_router)
     return dispatcher
 
 

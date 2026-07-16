@@ -77,6 +77,7 @@ async def assert_schema_and_constraints(settings: Settings) -> None:
             "orders",
             "duplicate_groups",
             "notification_deliveries",
+            "notification_subscriptions",
             "favorites",
             "audit_logs",
             "failed_tasks",

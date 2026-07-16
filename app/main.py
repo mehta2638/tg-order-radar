@@ -9,6 +9,7 @@ from app.api.keywords import router as keywords_router
 from app.api.orders import router as orders_router
 from app.api.sources import router as sources_router
 from app.api.stats import router as stats_router
+from app.api.subscriptions import router as subscriptions_router
 from app.core.config import get_settings
 from app.core.correlation import CorrelationIdMiddleware
 from app.core.errors import register_error_handlers
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(favorites_router)
     app.include_router(keywords_router)
     app.include_router(stats_router)
+    app.include_router(subscriptions_router)
     return app
 
 

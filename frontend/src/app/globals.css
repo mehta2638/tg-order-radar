@@ -185,6 +185,12 @@ th {
   gap: 8px;
 }
 
+.checkbox-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .muted {
   color: var(--muted);
 }

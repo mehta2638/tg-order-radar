@@ -93,6 +93,9 @@ celery_app.conf.update(
         "app.workers.tasks.classify_message_task": {"queue": CLASSIFICATION_QUEUE},
         "app.workers.tasks.detect_duplicates_task": {"queue": DUPLICATE_DETECTION_QUEUE},
         "app.workers.tasks.send_notification_task": {"queue": NOTIFICATIONS_QUEUE},
+        "app.workers.tasks.process_deferred_notifications_task": {
+            "queue": NOTIFICATIONS_QUEUE,
+        },
         "app.workers.tasks.archive_stale_orders_task": {"queue": MAINTENANCE_QUEUE},
         "app.workers.tasks.recalculate_source_activity_task": {
             "queue": MAINTENANCE_QUEUE,
@@ -114,6 +117,10 @@ celery_app.conf.update(
         "collect-public-sources": {
             "task": "app.workers.tasks.enqueue_collectable_sources",
             "schedule": float(settings.collector_poll_interval_seconds),
+        },
+        "process-deferred-notifications": {
+            "task": "app.workers.tasks.process_deferred_notifications_task",
+            "schedule": 60.0,
         },
     },
 )

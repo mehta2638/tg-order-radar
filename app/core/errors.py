@@ -29,6 +29,16 @@ def error_payload(error: ApiError) -> dict[str, dict[str, Any]]:
     }
 
 
+def json_safe(value: Any) -> Any:
+    if isinstance(value, BaseException):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return value
+
+
 async def api_error_handler(request: Request, exc: Exception) -> JSONResponse:
     if not isinstance(exc, ApiError):
         raise exc
@@ -50,7 +60,7 @@ async def validation_error_handler(
         code="VALIDATION_ERROR",
         message="Request validation failed.",
         status_code=422,
-        details={"errors": exc.errors()},
+        details={"errors": json_safe(exc.errors())},
     )
     return JSONResponse(status_code=error.status_code, content=error_payload(error))
 

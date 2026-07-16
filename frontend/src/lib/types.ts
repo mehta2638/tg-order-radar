@@ -114,3 +114,48 @@ export interface Favorite {
   created_at: string;
   order: Order | null;
 }
+
+export interface Subscription {
+  id: string;
+  user_id: string;
+  name: string;
+  enabled: boolean;
+  min_relevance_score: number | null;
+  project_types: string[];
+  budget_min: string | null;
+  budget_max: string | null;
+  currencies: string[];
+  source_ids: string[];
+  positive_keywords: string[];
+  negative_keywords: string[];
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  timezone: string;
+  freshness_days: number | null;
+  max_notifications_per_period: number | null;
+  rate_limit_period_minutes: number;
+  similar_cooldown_minutes: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubscriptionPayload {
+  name: string;
+  enabled: boolean;
+  min_relevance_score?: number | null;
+  project_types: string[];
+  budget_min?: string | null;
+  budget_max?: string | null;
+  currencies: string[];
+  source_ids: string[];
+  positive_keywords: string[];
+  negative_keywords: string[];
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  timezone: string;
+  freshness_days?: number | null;
+  max_notifications_per_period?: number | null;
+  rate_limit_period_minutes: number;
+  similar_cooldown_minutes?: number | null;
+  tg_chat_id?: number | null;
+}
