@@ -218,7 +218,7 @@ def classify_message_task(
 def detect_duplicates_task(
     order_id: str,
     correlation_id: str | None = None,
-) -> dict[str, int | str | bool | None]:
+) -> dict[str, float | int | str | bool | None]:
     result = run_async(detect_duplicates_for_order(UUID(order_id)))
     if result.is_canonical:
         send_notification_task.apply_async(
@@ -236,6 +236,8 @@ def detect_duplicates_task(
         else None,
         "duplicate_count": result.duplicate_count,
         "method": result.method,
+        "similarity_score": result.similarity_score,
+        "semantic_status": result.semantic_status,
     }
 
 

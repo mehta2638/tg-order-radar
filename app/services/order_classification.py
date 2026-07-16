@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.classification.ml import MlFallback, MlPrediction, predict_with_ml
 from app.classification.rules import (
     ClassificationInput,
     EntityFact,
@@ -29,6 +30,17 @@ class OrderClassificationResult:
     manual_review: bool
     relevance_score: int
     order_id: UUID | None = None
+
+
+@dataclass(frozen=True)
+class ClassificationDecision:
+    label: str
+    confidence: float
+    manual_review: bool
+    relevance_score: int
+    method: str
+    explanation: dict[str, Any]
+    model_version: str | None = None
 
 
 async def classify_message(
@@ -65,17 +77,18 @@ async def classify_message_in_session(
     )
     classification_input = build_classification_input(message, entities)
     rules_result = classify_rules(classification_input)
-    await persist_classification(session, message.id, rules_result)
-    order = await persist_order(session, message, entities, rules_result)
+    decision = build_classification_decision(classification_input, rules_result)
+    await persist_classification(session, message.id, decision)
+    order = await persist_order(session, message, entities, decision)
     await session.flush()
 
     return OrderClassificationResult(
         message_id=message.id,
         status="classified",
-        label=rules_result.label,
-        confidence=rules_result.confidence,
-        manual_review=rules_result.manual_review,
-        relevance_score=rules_result.relevance_score,
+        label=decision.label,
+        confidence=decision.confidence,
+        manual_review=decision.manual_review,
+        relevance_score=decision.relevance_score,
         order_id=order.id if order is not None else None,
     )
 
@@ -111,10 +124,50 @@ def entity_fact(entity: MessageEntity) -> EntityFact:
     )
 
 
+def build_classification_decision(
+    classification_input: ClassificationInput,
+    rules_result: RulesClassificationResult,
+) -> ClassificationDecision:
+    ml_result = predict_with_ml(classification_input.normalized_text, get_settings())
+    if isinstance(ml_result, MlPrediction):
+        return ClassificationDecision(
+            label=ml_result.label,
+            confidence=ml_result.confidence,
+            manual_review=False,
+            relevance_score=rules_result.relevance_score if ml_result.label == "order" else 0,
+            method="ml",
+            model_version=ml_result.model_version,
+            explanation={
+                "ml": ml_result.explanation,
+                "rules_shadow": rules_result.explanation,
+            },
+        )
+
+    return rules_decision(rules_result, ml_result)
+
+
+def rules_decision(
+    rules_result: RulesClassificationResult,
+    fallback: MlFallback,
+) -> ClassificationDecision:
+    explanation = {
+        **rules_result.explanation,
+        "ml_fallback": {"reason": fallback.reason, "details": fallback.details},
+    }
+    return ClassificationDecision(
+        label=rules_result.label,
+        confidence=rules_result.confidence,
+        manual_review=rules_result.manual_review,
+        relevance_score=rules_result.relevance_score,
+        method="rules",
+        explanation=explanation,
+    )
+
+
 async def persist_classification(
     session: AsyncSession,
     message_id: UUID,
-    result: RulesClassificationResult,
+    result: ClassificationDecision,
 ) -> None:
     await session.execute(delete(Classification).where(Classification.message_id == message_id))
     session.add(
@@ -122,7 +175,8 @@ async def persist_classification(
             message_id=message_id,
             label=result.label,
             confidence=Decimal(str(result.confidence)),
-            method="rules",
+            method=result.method,
+            model_version=result.model_version,
             manual_review=result.manual_review,
             explanation=result.explanation,
         )
@@ -133,7 +187,7 @@ async def persist_order(
     session: AsyncSession,
     message: Message,
     entities: list[MessageEntity],
-    result: RulesClassificationResult,
+    result: ClassificationDecision,
 ) -> Order | None:
     existing_order = await get_order_by_message(session, message.id)
     if not should_create_order(message, result):
@@ -158,7 +212,7 @@ async def get_order_by_message(session: AsyncSession, message_id: UUID) -> Order
     return result.one_or_none()
 
 
-def should_create_order(message: Message, result: RulesClassificationResult) -> bool:
+def should_create_order(message: Message, result: ClassificationDecision) -> bool:
     settings = get_settings()
     if result.label != "order" or result.manual_review:
         return False

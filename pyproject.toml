@@ -12,7 +12,10 @@ dependencies = [
     "fastapi",
     "httpx",
     "pydantic-settings",
+    "pgvector",
     "redis",
+    "scikit-learn",
+    "sentence-transformers",
     "sqlalchemy[asyncio]",
     "structlog",
     "telethon",
@@ -55,7 +58,23 @@ pretty = true
 packages = ["app"]
 
 [[tool.mypy.overrides]]
-module = ["aiogram", "aiogram.*", "celery", "celery.*", "kombu", "kombu.*", "telethon", "telethon.*"]
+module = [
+    "aiogram",
+    "aiogram.*",
+    "celery",
+    "celery.*",
+    "joblib",
+    "kombu",
+    "kombu.*",
+    "pgvector",
+    "pgvector.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+    "sklearn",
+    "sklearn.*",
+    "telethon",
+    "telethon.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.db.session import async_session_factory
 from app.models import DuplicateGroup, Message, Order
 from app.services.audit import add_audit_log
+from app.services.semantic_deduplication import find_semantic_duplicate
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,8 @@ class DeduplicationResult:
     duplicate_group_id: UUID | None
     duplicate_count: int
     method: str
+    similarity_score: float | None = None
+    semantic_status: str | None = None
 
 
 async def detect_duplicates_for_order(
@@ -73,6 +76,69 @@ async def detect_duplicates_in_session(
     method = dedupe_method(message, fingerprint, candidates)
 
     if len(candidates) <= 1:
+        semantic_result = await find_semantic_duplicate(session, order)
+        best_semantic_candidate = semantic_result.best_candidate
+        if semantic_result.status == "auto_merge" and best_semantic_candidate is not None:
+            semantic_candidates = await load_orders_with_messages(
+                session,
+                [order.id, best_semantic_candidate.order_id],
+            )
+            canonical_candidate = choose_canonical_order(
+                [candidate_from_order(item) for item in semantic_candidates]
+            )
+            duplicate_group = await upsert_duplicate_group(
+                session,
+                semantic_candidates,
+                canonical_candidate.order_id,
+                "semantic",
+                Decimal(str(round(best_semantic_candidate.similarity, 4))),
+            )
+            await add_audit_log(
+                session,
+                action="duplicate.semantic_auto_merge",
+                entity="order",
+                entity_id=order.id,
+                payload={
+                    "candidate_order_id": str(best_semantic_candidate.order_id),
+                    "similarity": round(best_semantic_candidate.similarity, 4),
+                    "comparisons": semantic_result.comparisons,
+                },
+            )
+            return DeduplicationResult(
+                order_id=order.id,
+                status="duplicate_grouped",
+                is_canonical=order.id == canonical_candidate.order_id,
+                canonical_order_id=canonical_candidate.order_id,
+                duplicate_group_id=duplicate_group.id,
+                duplicate_count=len(semantic_candidates),
+                method="semantic",
+                similarity_score=best_semantic_candidate.similarity,
+                semantic_status=semantic_result.status,
+            )
+        if semantic_result.status == "manual_review" and best_semantic_candidate is not None:
+            await add_audit_log(
+                session,
+                action="duplicate.semantic_review_candidate",
+                entity="order",
+                entity_id=order.id,
+                payload={
+                    "candidate_order_id": str(best_semantic_candidate.order_id),
+                    "similarity": round(best_semantic_candidate.similarity, 4),
+                    "comparisons": semantic_result.comparisons,
+                },
+            )
+            await session.flush()
+            return DeduplicationResult(
+                order_id=order.id,
+                status="semantic_review",
+                is_canonical=True,
+                canonical_order_id=order.id,
+                duplicate_group_id=None,
+                duplicate_count=1,
+                method="semantic_review",
+                similarity_score=best_semantic_candidate.similarity,
+                semantic_status=semantic_result.status,
+            )
         order.duplicate_group_id = None
         await session.flush()
         return DeduplicationResult(
@@ -83,6 +149,7 @@ async def detect_duplicates_in_session(
             duplicate_group_id=None,
             duplicate_count=1,
             method=method,
+            semantic_status=semantic_result.status,
         )
 
     canonical_candidate = choose_canonical_order(
@@ -141,6 +208,20 @@ async def find_duplicate_candidates(
     if order.id not in {row_order.id for row_order, _ in rows}:
         rows.append((order, message))
     return rows
+
+
+async def load_orders_with_messages(
+    session: AsyncSession,
+    order_ids: list[UUID],
+) -> list[tuple[Order, Message]]:
+    if not order_ids:
+        return []
+    result = await session.execute(
+        select(Order, Message)
+        .join(Message, Order.message_id == Message.id)
+        .where(Order.id.in_(order_ids))
+    )
+    return [(row[0], row[1]) for row in result.all()]
 
 
 def build_duplicate_fingerprint(order: Order, message: Message) -> str:
@@ -234,6 +315,7 @@ async def upsert_duplicate_group(
     candidates: list[tuple[Order, Message]],
     canonical_order_id: UUID,
     method: str,
+    similarity: Decimal | None = None,
 ) -> DuplicateGroup:
     existing_groups = [
         order.duplicate_group_id for order, _ in candidates if order.duplicate_group_id is not None
@@ -248,7 +330,7 @@ async def upsert_duplicate_group(
 
     duplicate_group.canonical_order_id = canonical_order_id
     duplicate_group.method = method
-    duplicate_group.similarity = Decimal("1.0000")
+    duplicate_group.similarity = similarity or Decimal("1.0000")
     duplicate_group.size = len(candidates)
     for order, _ in candidates:
         order.duplicate_group_id = duplicate_group.id

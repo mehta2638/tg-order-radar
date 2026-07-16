@@ -96,9 +96,54 @@ The worker listens to `source_validation`, `telegram_collection`, `message_proce
 
 The `collector` service runs a Celery worker dedicated to `telegram_collection`. Celery beat periodically enqueues public enabled sources with `access_status=ok`; each source is protected by a Redis lease so parallel collector processes do not collect the same source at the same time. First collection backfills the last 7 days plus a 1-day buffer, then later runs collect messages after `last_seen_message_id`.
 
-Message processing is rules-only in the MVP: it normalizes raw text, detects language, applies positive and negative dictionaries, extracts project type, budget, deadline and contacts, stores `message_entities`, and writes `messages.passed_prefilter`. Classification, duplicate detection, and notifications are handled by downstream Celery queues.
+Message processing normalizes raw text, detects language, applies positive and negative dictionaries, extracts project type, budget, deadline and contacts, stores `message_entities`, and writes `messages.passed_prefilter`. Classification, duplicate detection, and notifications are handled by downstream Celery queues.
 
-Rules classification assigns `order`, `vacancy`, `service_ad`, `resume`, `partnership`, `spam`, `discussion`, or `irrelevant`, stores `classifications.method=rules`, and calculates `relevance_score` with the section 9 weighted formula. Orders are created only for fresh `order` messages above the configured relevance and confidence thresholds; ML and LLM stages are not used in the MVP.
+Rules classification assigns `order`, `vacancy`, `service_ad`, `resume`, `partnership`, `spam`, `discussion`, or `irrelevant`, stores `classifications.method=rules`, and calculates `relevance_score` with the section 9 weighted formula. Orders are created only for fresh `order` messages above the configured relevance and confidence thresholds.
+
+The optional ML classifier uses scikit-learn TF-IDF word/char n-grams with Logistic Regression and safe rules fallback. It is disabled by default and is never trained automatically on API, worker, or test startup. Configure it with:
+
+```text
+ML_CLASSIFICATION_ENABLED=false
+ML_MODEL_ARTIFACT_PATH=artifacts/ml/classifier.joblib
+ML_MIN_CONFIDENCE=0.7
+ML_MODEL_VERSION=
+```
+
+The local training dataset is `tests/fixtures/rules_regression_dataset.json`. Train and evaluate a local artifact manually:
+
+```bash
+python -m scripts.ml_classifier baseline --dataset tests/fixtures/rules_regression_dataset.json
+python -m scripts.ml_classifier train --dataset tests/fixtures/rules_regression_dataset.json --artifact artifacts/ml/classifier.joblib --model-version local-v1
+python -m scripts.ml_classifier evaluate --dataset tests/fixtures/rules_regression_dataset.json --artifact artifacts/ml/classifier.joblib
+```
+
+Artifacts under `artifacts/` are ignored by Git. Each artifact contains `model_version`, `trained_at`, class list, feature schema version, holdout metrics, confusion matrix, and dataset checksum.
+
+Semantic dedup is an optional expensive layer after exact `content_hash` and deterministic fingerprint dedup. It uses pgvector plus the compact multilingual `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` model (384 dimensions), and is disabled by default:
+
+```text
+SEMANTIC_DEDUP_ENABLED=false
+SEMANTIC_MODEL_NAME=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+SEMANTIC_MODEL_VERSION=paraphrase-multilingual-MiniLM-L12-v2
+SEMANTIC_EMBEDDING_DIMENSION=384
+SEMANTIC_SIMILARITY_THRESHOLD=0.9
+SEMANTIC_REVIEW_THRESHOLD=0.82
+SEMANTIC_DEDUP_WINDOW_DAYS=7
+SEMANTIC_BATCH_SIZE=32
+SEMANTIC_DEVICE=
+```
+
+The compose PostgreSQL image is `pgvector/pgvector:pg16`. Existing volumes are not removed automatically; if an existing local database was created from plain `postgres:16`, recreate only the postgres container (`docker compose up -d postgres --force-recreate --no-deps`) without deleting the volume, then ensure `CREATE EXTENSION vector` and the `orders.semantic_embedding*` columns exist. Until then semantic dedup stays in safe fallback. Docker images install CPU `torch` to keep builds practical. Semantic embeddings are stored on `orders.semantic_embedding` for canonical order candidates only.
+
+Semantic utility commands:
+
+```bash
+python -m scripts.semantic_dedup check-model
+python -m scripts.semantic_dedup embed --text "Нужен лендинг для курса"
+python -m scripts.semantic_dedup search --text "Ищу исполнителя на посадочную страницу"
+python -m scripts.semantic_dedup backfill --dry-run --batch-size 100
+python -m scripts.semantic_dedup backfill --batch-size 100
+```
 
 Basic MVP deduplication links repeated orders within the 7-day freshness window by exact Telegram identity, normalized `content_hash`, and a deterministic fingerprint from normalized text, contacts, budget, and project type. Duplicate groups choose a canonical order by earliest publication time, then completeness, relevance, and order id; only canonical orders are enqueued for notifications.
 

@@ -145,8 +145,46 @@ def test_detect_duplicates_task_enqueues_only_canonical(
         "duplicate_group_id": None,
         "duplicate_count": 1,
         "method": "fingerprint",
+        "similarity_score": None,
+        "semantic_status": None,
     }
     assert enqueued == [str(order_id)]
+
+
+def test_detect_duplicates_task_skips_semantic_duplicate_notification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order_id = uuid4()
+    canonical_id = uuid4()
+    enqueued: list[str] = []
+
+    async def fake_detect_duplicates_for_order(order_id: UUID) -> DeduplicationResult:
+        return DeduplicationResult(
+            order_id=order_id,
+            status="duplicate_grouped",
+            is_canonical=False,
+            canonical_order_id=canonical_id,
+            duplicate_group_id=uuid4(),
+            duplicate_count=2,
+            method="semantic",
+            similarity_score=0.93,
+            semantic_status="auto_merge",
+        )
+
+    class FakeNotificationTask:
+        def apply_async(self, args: tuple[str], **kwargs: object) -> None:
+            enqueued.append(args[0])
+
+    monkeypatch.setattr(tasks, "detect_duplicates_for_order", fake_detect_duplicates_for_order)
+    monkeypatch.setattr(tasks, "send_notification_task", FakeNotificationTask())
+
+    result = detect_duplicates_task(str(order_id))
+
+    assert result["method"] == "semantic"
+    assert result["is_canonical"] is False
+    assert result["similarity_score"] == 0.93
+    assert result["semantic_status"] == "auto_merge"
+    assert enqueued == []
 
 
 def test_notification_task_skips_without_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:

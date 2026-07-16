@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-tg_order_radar}
       POSTGRES_USER: ${POSTGRES_USER:-tg_order_radar}

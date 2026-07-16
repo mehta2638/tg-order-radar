@@ -239,7 +239,7 @@ class Classification(UuidPkMixin, TimestampMixin, Base):
             ")",
             name="label",
         ),
-        CheckConstraint("method in ('rules','manual')", name="method"),
+        CheckConstraint("method in ('rules','ml','manual')", name="method"),
         Index("ix_classifications_message_id", "message_id"),
         Index("ix_classifications_label", "label"),
     )
@@ -252,6 +252,7 @@ class Classification(UuidPkMixin, TimestampMixin, Base):
     label: Mapped[str] = mapped_column(String(32), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
     method: Mapped[str] = mapped_column(String(16), nullable=False, default="rules")
+    model_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     manual_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     explanation: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 

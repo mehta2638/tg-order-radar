@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -17,6 +18,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.classification.ml import clear_model_cache
+from app.classification.training import load_dataset, save_artifact, train_model
 from app.core.config import Settings, get_settings
 from app.models import (
     Classification,
@@ -32,6 +35,7 @@ from app.services.deduplication import detect_duplicates_in_session
 from app.services.dictionaries import invalidate_dictionary_cache
 from app.services.message_processing import process_message_in_session
 from app.services.order_classification import classify_message_in_session
+from app.services.semantic_deduplication import SemanticCandidate, SemanticDedupResult
 
 
 def run(coro_factory: Callable[[], Awaitable[None]]) -> None:
@@ -293,6 +297,199 @@ async def test_same_order_in_multiple_channels_has_single_canonical_order(
         assert duplicate_group.size == 2
         assert first_order.duplicate_group_id == duplicate_group.id
         assert second_order.duplicate_group_id == duplicate_group.id
+
+
+async def test_exact_duplicate_is_resolved_before_semantic_layer(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_semantic(*args: object, **kwargs: object) -> SemanticDedupResult:
+        raise AssertionError("semantic layer must not run for exact duplicates")
+
+    monkeypatch.setattr("app.services.deduplication.find_semantic_duplicate", fail_semantic)
+
+    async with session_factory() as session:
+        await seed_dictionaries(session)
+        first_source = await create_source(session, tg_peer_id=-100981, username="exact_one")
+        second_source = await create_source(session, tg_peer_id=-100982, username="exact_two")
+        text = "Нужен лендинг. Бюджет 100к ₽, сделать за 5 дней, пишите @client"
+        first_message = await create_message(
+            session,
+            first_source,
+            text,
+            content_hash="exact-content-hash",
+        )
+        second_message = await create_message(
+            session,
+            second_source,
+            text,
+            content_hash="exact-content-hash",
+        )
+        for message in (first_message, second_message):
+            await process_message_in_session(session, message.id)
+            await classify_message_in_session(session, message.id)
+
+        first_order = await session.scalar(
+            select(Order).where(Order.message_id == first_message.id)
+        )
+        second_order = await session.scalar(
+            select(Order).where(Order.message_id == second_message.id)
+        )
+        assert first_order is not None
+        assert second_order is not None
+
+        result = await detect_duplicates_in_session(session, second_order.id)
+
+        assert result.method == "content_hash"
+        assert result.is_canonical is False
+
+
+async def test_semantic_duplicate_auto_merge_is_idempotent(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with session_factory() as session:
+        await seed_dictionaries(session)
+        first_source = await create_source(session, tg_peer_id=-100971, username="semantic_one")
+        second_source = await create_source(session, tg_peer_id=-100972, username="semantic_two")
+        first_message = await create_message(
+            session,
+            first_source,
+            "Нужен лендинг для курса. Бюджет 80к, сделать за 10 дней, связь @client",
+            content_hash="semantic-one",
+        )
+        second_message = await create_message(
+            session,
+            second_source,
+            "Ищу разработчика сделать лендинг для онлайн-курса, бюджет 80000, @client",
+            content_hash="semantic-two",
+        )
+        for message in (first_message, second_message):
+            await process_message_in_session(session, message.id)
+            await classify_message_in_session(session, message.id)
+
+        first_order = await session.scalar(
+            select(Order).where(Order.message_id == first_message.id)
+        )
+        second_order = await session.scalar(
+            select(Order).where(Order.message_id == second_message.id)
+        )
+        assert first_order is not None
+        assert second_order is not None
+
+        async def fake_semantic(*args: object, **kwargs: object) -> SemanticDedupResult:
+            return SemanticDedupResult(
+                status="auto_merge",
+                candidates=[SemanticCandidate(order_id=first_order.id, similarity=0.93)],
+                comparisons=1,
+            )
+
+        monkeypatch.setattr("app.services.deduplication.find_semantic_duplicate", fake_semantic)
+
+        first_result = await detect_duplicates_in_session(session, second_order.id)
+        second_result = await detect_duplicates_in_session(session, second_order.id)
+        duplicate_groups = list(await session.scalars(select(DuplicateGroup)))
+
+        assert first_result.method == "semantic"
+        assert first_result.is_canonical is False
+        assert second_result.duplicate_group_id == first_result.duplicate_group_id
+        assert len(duplicate_groups) == 1
+        assert duplicate_groups[0].size == 2
+
+
+async def test_borderline_semantic_similarity_goes_to_review_without_merge(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with session_factory() as session:
+        await seed_dictionaries(session)
+        source = await create_source(session, tg_peer_id=-100961, username="semantic_review")
+        first_message = await create_message(
+            session,
+            source,
+            "Нужен лендинг для курса. Бюджет 80к, сделать за 10 дней, связь @client",
+            content_hash="review-one",
+        )
+        second_message = await create_message(
+            session,
+            source,
+            "Нужно сделать сайт для школы, бюджет 90000, пишите @client",
+            content_hash="review-two",
+        )
+        for message in (first_message, second_message):
+            await process_message_in_session(session, message.id)
+            await classify_message_in_session(session, message.id)
+
+        first_order = await session.scalar(
+            select(Order).where(Order.message_id == first_message.id)
+        )
+        second_order = await session.scalar(
+            select(Order).where(Order.message_id == second_message.id)
+        )
+        assert first_order is not None
+        assert second_order is not None
+
+        async def fake_semantic(*args: object, **kwargs: object) -> SemanticDedupResult:
+            return SemanticDedupResult(
+                status="manual_review",
+                candidates=[SemanticCandidate(order_id=first_order.id, similarity=0.85)],
+                comparisons=1,
+            )
+
+        monkeypatch.setattr("app.services.deduplication.find_semantic_duplicate", fake_semantic)
+
+        result = await detect_duplicates_in_session(session, second_order.id)
+
+        assert result.status == "semantic_review"
+        assert result.duplicate_group_id is None
+        assert result.is_canonical is True
+
+
+async def test_ml_classification_saves_version_and_stays_idempotent(
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifact_path = tmp_path / "classifier.joblib"
+    save_artifact(
+        train_model(load_dataset(), model_version="test-ml-v1"),
+        artifact_path,
+    )
+    monkeypatch.setenv("ML_CLASSIFICATION_ENABLED", "true")
+    monkeypatch.setenv("ML_MODEL_ARTIFACT_PATH", str(artifact_path))
+    monkeypatch.setenv("ML_MIN_CONFIDENCE", "0.7")
+    get_settings.cache_clear()
+    clear_model_cache()
+
+    try:
+        async with session_factory() as session:
+            await seed_dictionaries(session)
+            source = await create_source(session)
+            message = await create_message(
+                session,
+                source,
+                "Нужен лендинг для курса, бюджет 80к, сделать за 10 дней, связь @client",
+            )
+            await process_message_in_session(session, message.id)
+
+            first_result = await classify_message_in_session(session, message.id)
+            second_result = await classify_message_in_session(session, message.id)
+            classifications = list(
+                await session.scalars(
+                    select(Classification).where(Classification.message_id == message.id)
+                )
+            )
+            order = await session.scalar(select(Order).where(Order.message_id == message.id))
+
+            assert first_result.label == "order"
+            assert second_result.order_id == first_result.order_id
+            assert len(classifications) == 1
+            assert classifications[0].method == "ml"
+            assert classifications[0].model_version == "test-ml-v1"
+            assert order is not None
+    finally:
+        get_settings.cache_clear()
+        clear_model_cache()
 
 
 @pytest.mark.parametrize(
